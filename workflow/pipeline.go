@@ -139,8 +139,10 @@ func PipelineWorkflow(ctx workflow.Context, input model.PipelineInput) (Pipeline
 		talkSegments = append(talkSegments, ps)
 	}
 
-	// Step 7b: Honour reviewer-set `skip: true` edits to metadata.json. Same
-	// "read at the gate boundary so human edits win" pattern Upload uses.
+	// Step 7b: Honour `skip: true` in metadata.json. The flag may have been
+	// set by the LLM during GatherMetadata (MC-handoff detection) or by the
+	// human reviewer during the review_approval gate — either way, read it
+	// fresh from disk at the gate boundary so the latest state wins.
 	if len(talkSegments) > 0 {
 		refs := make([]model.SegmentMetadataRef, len(talkSegments))
 		for i, ts := range talkSegments {
@@ -169,7 +171,7 @@ func PipelineWorkflow(ctx workflow.Context, input model.PipelineInput) (Pipeline
 			kept = append(kept, ts)
 		}
 		if len(skippedIndices) > 0 {
-			workflow.GetLogger(ctx).Info("Reviewer flagged segments to skip", "indices", skippedIndices)
+			workflow.GetLogger(ctx).Info("Filtering segments flagged skip", "indices", skippedIndices)
 		}
 		talkSegments = kept
 	}

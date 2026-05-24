@@ -34,20 +34,23 @@ Instructions:
   "chapters": [
     {"time": 123.4, "title": "Short chapter title"}
   ]
+  // optional: "skip": true — see the MC-handoff rule below; omit this field entirely in the normal case.
 }
    YouTube title length budget: the uploaded video title is composed as "<speaker> - <title>" (e.g. "Rob Amos - Forging a Sword Spirit") and YouTube hard-caps it at 100 characters. Keep the talk title short enough that the combined form fits. Multi-speaker talks (e.g. "April Staines & Nabila Herzegovina") spend 35-40 characters on the prefix alone, so for multiple speakers keep the title under about 55 characters; for a single speaker target around 60 characters for the title.
 5. This is an Australian community — write the title, description, tags, and chapter titles in Australian English (colour not color, organise not organize, behaviour not behavior, recognise not recognize, centre not center, analyse not analyze, defence not defense, etc.) regardless of how words appear in the transcript. Exception: if the Meetup agenda's title or speaker name is being used verbatim, preserve its spelling as published.
 6. Omit any field you are not confident about. For example, if the speaker never clearly states their name and no agenda entry matches, leave "speaker" out entirely rather than guessing.
 7. Tags should be relevant YouTube tags for discoverability — include technology names, frameworks, and broad topics (e.g. "iOS", "Swift", "SwiftUI", "testing", "CocoaHeads", "Melbourne").
-8. Chapters identify 3–7 natural section boundaries in the talk:
+8. **Detecting MC-handoff segments.** Occasionally a segment is not actually a talk — it's the host briefly introducing the next speaker and handing over. Typical signals: short total duration (often well under 5 minutes); the speaker is announcing someone else by name; phrases like "please welcome", "give a warm round of applause", "without further ado", "I'd like to introduce", "next up we have"; the named talk title is something the speaker is *about to* give rather than *giving*; no substantive content of the speaker's own. The Meetup agenda is a useful cross-check — if the segment introduces a talk that appears on the agenda but the segment itself contains none of that talk's content, that's a handoff. When you are confident this is what the segment is, set "skip": true in metadata.json. Still fill in title, speaker, description as best you can from the transcript so the reviewer can audit your decision and flip skip back to false if they disagree. In metadata_reasoning.md, lead with a clearly-marked section (heading "## Skip Decision") explaining what the segment actually contains, which signals triggered the skip, and which talk on the agenda the hand-off was *to*. **Be conservative** — short, dense, or oddly-structured talks are still talks; only skip when the segment is *clearly* introduction-only. When in doubt, do NOT skip; the human reviewer can still flag it manually.
+9. Chapters identify 3–7 natural section boundaries in the talk:
    - "time" is the start of the section in seconds, taken directly from the SRT timestamps you read.
    - Chapter titles should be short (2–5 words) and descriptive (e.g. "Background", "What we built", "Demo", "Q&A", "Lessons learned").
    - Do NOT produce a generic "Introduction" / "Intro" chapter. The final video opens with a sponsor bumper followed by a hardcoded "Intro" marker at 0:00, so a chapter named Introduction near the start would be visibly redundant. Begin your chapters at the first substantive section transition instead (e.g. the speaker moving from self-intro into background, problem statement, demo, etc.).
    - Chapters are REQUIRED for any talk longer than ~20 minutes. Identify topic shifts even when the speaker doesn't explicitly announce them — moving between distinct projects, demos, frameworks, or subjects all count as chapter boundaries. Use the description you're writing as a guide: if the description enumerates multiple topics, those are your chapters.
    - Omit the "chapters" field entirely only if the talk is genuinely short (under ~15 minutes).
-9. Write ONLY valid JSON to the metadata.json file — no markdown, no commentary.
-10. Also write a "metadata_reasoning.md" file in the same directory explaining your key decisions: how you chose the title and speaker (and specifically whether you used a Meetup agenda match — name the matched agenda entry; or note "no agenda available" / "no confident match"), which boundaries became chapters and why (or, if applicable, why you omitted chapters), and any judgement calls on tags. Keep it brief — a few short paragraphs or a bulleted list. This file is read by a human reviewer before the video is assembled.
-11. When done, reply with just the word "done".
+   - If you are setting "skip": true, chapters are not required — the segment will not be assembled or uploaded.
+10. Write ONLY valid JSON to the metadata.json file — no markdown, no commentary.
+11. Also write a "metadata_reasoning.md" file in the same directory explaining your key decisions: how you chose the title and speaker (and specifically whether you used a Meetup agenda match — name the matched agenda entry; or note "no agenda available" / "no confident match"), which boundaries became chapters and why (or, if applicable, why you omitted chapters), and any judgement calls on tags. Keep it brief — a few short paragraphs or a bulleted list. This file is read by a human reviewer before the video is assembled. If you set "skip": true above, begin this file with the "## Skip Decision" section described in step 8 before any other reasoning.
+12. When done, reply with just the word "done".
 
 SRT file path: `
 
@@ -141,9 +144,9 @@ const reviewerNotesFooter = `
 
 ## Reviewer escape hatches
 
-These flags are NOT set by the metadata extraction — they're for you to add by hand to ` + "`metadata.json`" + ` before approving the review gate.
+Before approving the review gate, edit ` + "`metadata.json`" + ` to apply either of the following.
 
-- **Skip this talk entirely.** Add ` + "`\"skip\": true`" + ` to ` + "`metadata.json`" + ` to exclude this segment from assembly and upload. Use cases: MC speaker introductions that ended up as a separate segment, or talks where the speaker has withheld consent for individual upload. The pipeline will count this segment as skipped and move on.
+- **Skip this talk entirely.** Set ` + "`\"skip\": true`" + ` in ` + "`metadata.json`" + ` to exclude this segment from assembly and upload. The metadata extraction may have already done this for you — if it identified the segment as an MC handoff to the next speaker, you'll find ` + "`\"skip\": true`" + ` in ` + "`metadata.json`" + ` and a ` + "`## Skip Decision`" + ` section at the top of this file explaining why. Audit the decision (cross-check the SRT against the agenda) and flip it back to ` + "`false`" + ` if you disagree. Set ` + "`skip`" + ` yourself for the other case the LLM won't catch: a speaker who has withheld consent for individual upload. The pipeline counts skipped segments and moves on.
 - **Adjust trim points.** ` + "`trim.startSeconds`" + ` and ` + "`trim.endSeconds`" + ` are pre-filled with the auto-detected rough-cut boundaries (in rough-segment local time, i.e. seconds from the start of segments/segment-NN.mp4). Edit either to shift where Assemble cuts.
 `
 

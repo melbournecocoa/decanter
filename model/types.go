@@ -63,11 +63,16 @@ type Chapter struct {
 
 // TalkMetadata holds extracted metadata for a talk.
 //
-// Skip is the reviewer escape hatch: when true, the pipeline filters this
+// Skip is the segment-drop flag: when true, the pipeline filters this
 // segment out after the review_approval gate so it is neither assembled nor
-// uploaded. Used for MC-between-talks intros and for speakers who withhold
-// upload consent. The field is absent from metadata.json by default
-// (omitempty) — the reviewer adds it manually during the gate.
+// uploaded. It can be set by either the LLM (during GatherMetadata, when it
+// recognises an MC-handoff segment that was mis-classified as a talk because
+// it sits between bumpers) or the human reviewer (typical case: a speaker
+// withholds upload consent). The field is absent from metadata.json by
+// default (omitempty). When the LLM sets it, the accompanying
+// metadata_reasoning.md must lead with a clearly-marked section explaining
+// what the segment actually contains and which signals triggered the skip —
+// the reviewer reads that to decide whether to flip it back to false.
 type TalkMetadata struct {
 	Title       string     `json:"title"`
 	Speaker     string     `json:"speaker"`
