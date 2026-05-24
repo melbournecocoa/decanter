@@ -149,10 +149,7 @@ func PipelineWorkflow(ctx workflow.Context, input model.PipelineInput) (Pipeline
 
 	// Step 7b: Honour reviewer-set `skip: true` edits to metadata.json. Same
 	// "read at the gate boundary so human edits win" pattern Upload uses.
-	// Gated behind workflow.GetVersion so workflows already past Step 7 when
-	// this filter was introduced replay cleanly (they take the no-op branch
-	// and continue to Assemble unchanged).
-	if v := workflow.GetVersion(ctx, "add-skip-flag-filter", workflow.DefaultVersion, 1); v >= 1 && len(talkSegments) > 0 {
+	if len(talkSegments) > 0 {
 		refs := make([]model.SegmentMetadataRef, len(talkSegments))
 		for i, ts := range talkSegments {
 			refs[i] = model.SegmentMetadataRef{
