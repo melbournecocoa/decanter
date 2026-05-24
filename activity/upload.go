@@ -171,7 +171,7 @@ func (a *Activities) Upload(ctx context.Context, input model.UploadInput) (model
 	activity.RecordHeartbeat(ctx, "caption uploaded")
 
 	// Playlist.
-	year := time.Now().Year()
+	year := resolvePlaylistYear(event.RecordingDate)
 	playlistTitle := fmt.Sprintf("%d Presentations", year)
 	playlistID, err := findOrCreatePlaylist(ctx, svc, playlistTitle)
 	if err != nil {
@@ -270,6 +270,26 @@ func findOrCreatePlaylist(ctx context.Context, svc *youtube.Service, title strin
 		return "", fmt.Errorf("create playlist: %w", err)
 	}
 	return created.Id, nil
+}
+
+// resolvePlaylistYear returns the calendar year (Melbourne local time) to use
+// in the playlist title. Falls back to the current year if recordingDate is
+// empty or unparseable — matching the historical behaviour for workflows that
+// don't carry a recording date — and falls back to the UTC year if the
+// Melbourne tzdata can't be loaded (deployment-level oddity, harmless for any
+// event not recorded across a year boundary).
+func resolvePlaylistYear(recordingDate string) int {
+	if recordingDate == "" {
+		return time.Now().Year()
+	}
+	t, err := time.Parse(time.RFC3339, recordingDate)
+	if err != nil {
+		return time.Now().Year()
+	}
+	if loc, err := time.LoadLocation(melbourneTZ); err == nil {
+		return t.In(loc).Year()
+	}
+	return t.Year()
 }
 
 // buildTitle composes the YouTube video title in the channel's existing
