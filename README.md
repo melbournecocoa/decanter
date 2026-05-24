@@ -98,8 +98,6 @@ Two human-review gates (`review_approval`, `upload_approval`) let you edit the L
 
 The pipeline ships with intro/outro/bumper media branded for Melbourne CocoaHeads. If you fork for your own community, replace those assets and point the relevant env vars at your files — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-See [MANIFESTO.md](MANIFESTO.md) for detailed pipeline design and proof-of-concept results.
-
 ## Running Tests
 
 ```bash

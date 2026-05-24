@@ -32,7 +32,6 @@ activity/activities.go    # Activities struct + constructor
 activity/*.go             # One file per activity (8 total)
 model/types.go            # All shared types and activity I/O structs
 scripts/                  # Python scripts (bumper detection, transcription)
-MANIFESTO.md              # Detailed pipeline design and PoC results
 ```
 
 ## Pipeline Steps (Activity Mapping)
@@ -48,9 +47,9 @@ MANIFESTO.md              # Detailed pipeline design and PoC results
 | 5b. Clean Transcript | `CleanTranscript` | Implemented (claude CLI) |
 | 6. Gather Metadata | `GatherMetadata` | Implemented (claude CLI) |
 | 7. Human Review | Signal gate (`review_approval`) | Working |
-| 8. Assemble | `Assemble` | Stub (will re-cut from source, not rough segment; see MANIFESTO.md) |
+| 8. Assemble | `Assemble` | Implemented (ffmpeg filter_complex, re-cuts from source) |
 | 9. Human Review | Signal gate (`upload_approval`) | Working |
-| 10. Upload | `Upload` | Stub |
+| 10. Upload | `Upload` | Implemented (YouTube Data API v3 + captions + playlist) |
 
 ## Environment Variables
 
@@ -67,5 +66,3 @@ MANIFESTO.md              # Detailed pipeline design and PoC results
 - Fan-out pattern: child workflows for per-segment processing, activity futures for parallel assembly/upload
 - Python tools (bumper detection, transcription) called as subprocesses from Go activities
 - **Split produces rough cuts, Assemble re-cuts precisely:** Split uses `-c copy` (fast, lossless, keyframe-aligned). Segments may include bumper bleed at boundaries — acceptable for transcription/metadata. `Segment.StartOffset` records the keyframe alignment delta. Assemble re-cuts from the original source during its single re-encode pass, using StartOffset to shift subtitle timecodes.
-
-See `MANIFESTO.md` for detailed pipeline design, PoC results, and incremental automation plan.

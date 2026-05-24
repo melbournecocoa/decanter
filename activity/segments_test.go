@@ -10,7 +10,7 @@ import (
 )
 
 func TestCalculateSegments_TwoBumpers(t *testing.T) {
-	// Matches PoC data from MANIFESTO.md
+	// Matches initial PoC data: two bumpers, three segments.
 	bumpers := []model.BumperRegion{
 		{VisualStart: 666, VisualEnd: 704},
 		{VisualStart: 3766, VisualEnd: 3820},
