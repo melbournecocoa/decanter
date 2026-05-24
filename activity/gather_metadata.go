@@ -93,6 +93,15 @@ func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetad
 	}
 	close(done)
 
+	// Append a fixed reviewer cheat sheet to metadata_reasoning.md. The LLM
+	// writes the upper portion (its decisions); this footer documents
+	// human-only escape hatches the reviewer can apply at the review gate.
+	reasoningPath := filepath.Join(filepath.Dir(metadataPath), "metadata_reasoning.md")
+	if err := appendReviewerNotes(reasoningPath); err != nil {
+		// Best-effort — don't fail the activity if the file is missing or unwriteable.
+		logger.Warn("Failed to append reviewer notes to metadata_reasoning.md", "path", reasoningPath, "error", err)
+	}
+
 	// Read the JSON file Claude wrote.
 	raw, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -124,4 +133,33 @@ func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetad
 
 	logger.Info("Metadata gathered", "title", metadata.Title, "speaker", metadata.Speaker, "trimStart", metadata.Trim.StartSeconds, "trimEnd", metadata.Trim.EndSeconds)
 	return model.GatherMetadataOutput{Metadata: metadata}, nil
+}
+
+const reviewerNotesFooter = `
+
+---
+
+## Reviewer escape hatches
+
+These flags are NOT set by the metadata extraction — they're for you to add by hand to ` + "`metadata.json`" + ` before approving the review gate.
+
+- **Skip this talk entirely.** Add ` + "`\"skip\": true`" + ` to ` + "`metadata.json`" + ` to exclude this segment from assembly and upload. Use cases: MC speaker introductions that ended up as a separate segment, or talks where the speaker has withheld consent for individual upload. The pipeline will count this segment as skipped and move on.
+- **Adjust trim points.** ` + "`trim.startSeconds`" + ` and ` + "`trim.endSeconds`" + ` are pre-filled with the auto-detected rough-cut boundaries (in rough-segment local time, i.e. seconds from the start of segments/segment-NN.mp4). Edit either to shift where Assemble cuts.
+`
+
+// appendReviewerNotes appends the fixed reviewer cheat-sheet footer to the
+// reasoning markdown the LLM just wrote. Idempotent across re-runs in the
+// same workspace: re-running GatherMetadata for the same segment overwrites
+// metadata_reasoning.md from scratch (Claude is told to write it), so the
+// footer is appended exactly once per write.
+func appendReviewerNotes(path string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(reviewerNotesFooter); err != nil {
+		return err
+	}
+	return nil
 }

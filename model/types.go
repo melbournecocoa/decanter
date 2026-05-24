@@ -62,6 +62,12 @@ type Chapter struct {
 }
 
 // TalkMetadata holds extracted metadata for a talk.
+//
+// Skip is the reviewer escape hatch: when true, the pipeline filters this
+// segment out after the review_approval gate so it is neither assembled nor
+// uploaded. Used for MC-between-talks intros and for speakers who withhold
+// upload consent. The field is absent from metadata.json by default
+// (omitempty) — the reviewer adds it manually during the gate.
 type TalkMetadata struct {
 	Title       string     `json:"title"`
 	Speaker     string     `json:"speaker"`
@@ -69,6 +75,7 @@ type TalkMetadata struct {
 	Tags        []string   `json:"tags"`
 	Chapters    []Chapter  `json:"chapters"`
 	Trim        *TrimRange `json:"trim,omitempty"`
+	Skip        bool       `json:"skip,omitempty"`
 }
 
 // TrimRange lets the reviewer override where Assemble cuts content out of the
@@ -228,6 +235,34 @@ type MeetupEvent struct {
 	EndTime     string `json:"endTime,omitempty"`
 	EventURL    string `json:"eventUrl"`
 	Description string `json:"description"`
+}
+
+// ReadSegmentMetadataInput is the input to the ReadSegmentMetadata activity.
+// Segments lists the talk segments whose metadata.json files should be read.
+// Each entry's SubtitlePath is workspace-relative; the activity locates
+// metadata.json in the same directory.
+type ReadSegmentMetadataInput struct {
+	Segments []SegmentMetadataRef
+}
+
+// SegmentMetadataRef pairs a segment index with the path used to locate its
+// on-disk metadata.json file (which sits next to the subtitle).
+type SegmentMetadataRef struct {
+	Index        int
+	SubtitlePath string
+}
+
+// ReadSegmentMetadataOutput returns the parsed metadata for each requested
+// segment, in the same order as the input.
+type ReadSegmentMetadataOutput struct {
+	Segments []SegmentMetadata
+}
+
+// SegmentMetadata pairs a segment index with the metadata read from its
+// metadata.json file.
+type SegmentMetadata struct {
+	Index    int
+	Metadata TalkMetadata
 }
 
 type AssembleInput struct {

@@ -88,6 +88,20 @@ func setupPipelineEnvCore(t *testing.T) (*testsuite.TestWorkflowEnvironment, *ac
 	return env, a, segments
 }
 
+// mockNoReviewerSkips installs a ReadSegmentMetadata mock returning Skip=false
+// for the single talk segment (index 1) — the default happy-path expectation.
+// Tests exercising the skip path register their own ReadSegmentMetadata mock
+// instead.
+func mockNoReviewerSkips(env *testsuite.TestWorkflowEnvironment, a *activity.Activities) {
+	env.OnActivity(a.ReadSegmentMetadata, mock.Anything, mock.Anything).Return(
+		model.ReadSegmentMetadataOutput{
+			Segments: []model.SegmentMetadata{
+				{Index: 1, Metadata: model.TalkMetadata{Title: "Test Talk", Speaker: "Test Speaker"}},
+			},
+		}, nil,
+	)
+}
+
 // setupPipelineEnv layers a Download mock on top of the core mocks — convenient
 // for the existing YouTube-input tests.
 func setupPipelineEnv(t *testing.T) (*testsuite.TestWorkflowEnvironment, []model.Segment) {
@@ -110,6 +124,8 @@ func TestPipelineWorkflow_HappyPath(t *testing.T) {
 	env, _ := setupPipelineEnv(t)
 
 	a := activity.New("/tmp/test", "assets/bumper_reference.png", "scripts", "", "", "", "Melbourne-CocoaHeads")
+
+	mockNoReviewerSkips(env, a)
 
 	// Mock Assemble for the single talk segment.
 	env.OnActivity(a.Assemble, mock.Anything, mock.Anything).Return(
@@ -170,6 +186,8 @@ func TestPipelineWorkflow_ReviewRejected(t *testing.T) {
 func TestPipelineWorkflow_LocalFileHappyPath(t *testing.T) {
 	env, a, _ := setupPipelineEnvCore(t)
 
+	mockNoReviewerSkips(env, a)
+
 	// Acquisition mock: Import instead of Download.
 	env.OnActivity(a.Import, mock.Anything, mock.MatchedBy(func(input model.ImportInput) bool {
 		return input.FileName == "recovered-stream.mp4"
@@ -205,6 +223,53 @@ func TestPipelineWorkflow_LocalFileHappyPath(t *testing.T) {
 	require.NoError(t, env.GetWorkflowResult(&result))
 	assert.Len(t, result.UploadedVideos, 1)
 	assert.Equal(t, 2, result.SkippedSegments)
+
+	env.AssertExpectations(t)
+}
+
+// TestPipelineWorkflow_ReviewerSkip exercises the metadata.json skip flag
+// path: ReadSegmentMetadata returns Skip=true for the only talk segment,
+// so Assemble and Upload must not run, and the segment is counted as skipped.
+func TestPipelineWorkflow_ReviewerSkip(t *testing.T) {
+	env, a, segments := setupPipelineEnvCore(t)
+	env.OnActivity(a.Download, mock.Anything, mock.Anything).Return(
+		model.DownloadOutput{VideoPath: "source.mp4"}, nil,
+	)
+
+	// Register ReadSegmentMetadata returning Skip=true for the talk segment.
+	// No default mock to override — testify-mock matches in declaration order,
+	// not specificity, so a shared default would have eaten this expectation.
+	env.OnActivity(a.ReadSegmentMetadata, mock.Anything, mock.MatchedBy(func(input model.ReadSegmentMetadataInput) bool {
+		return len(input.Segments) == 1 && input.Segments[0].Index == 1
+	})).Return(model.ReadSegmentMetadataOutput{
+		Segments: []model.SegmentMetadata{
+			{Index: 1, Metadata: model.TalkMetadata{Skip: true}},
+		},
+	}, nil)
+
+	// Assemble and Upload must NOT be called — no mocks registered. If the
+	// filter is broken and the workflow tries to call either, the test fails
+	// because the test environment rejects unregistered activity calls.
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("review_approval", model.ReviewApproval{Approved: true})
+	}, 0)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("upload_approval", model.ReviewApproval{Approved: true})
+	}, 0)
+
+	env.ExecuteWorkflow(PipelineWorkflow, testPipelineInput())
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result PipelineResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	// All three segments skipped: welcome (classify), seg-01 (reviewer), wrapup (classify).
+	assert.Equal(t, 3, result.SkippedSegments)
+	assert.Empty(t, result.UploadedVideos)
+	assert.Empty(t, result.YouTubeVideoIDs)
+	_ = segments
 
 	env.AssertExpectations(t)
 }

@@ -29,7 +29,7 @@ workflow/pipeline.go      # PipelineWorkflow (top-level)
 workflow/segment.go       # SegmentWorkflow (child, per segment)
 workflow/*_test.go        # Workflow tests (Temporal test framework)
 activity/activities.go    # Activities struct + constructor
-activity/*.go             # One file per activity (8 total)
+activity/*.go             # One file per activity
 model/types.go            # All shared types and activity I/O structs
 scripts/                  # Python scripts (bumper detection, transcription)
 ```
@@ -47,6 +47,7 @@ scripts/                  # Python scripts (bumper detection, transcription)
 | 5b. Clean Transcript | `CleanTranscript` | Implemented (claude CLI) |
 | 6. Gather Metadata | `GatherMetadata` | Implemented (claude CLI) |
 | 7. Human Review | Signal gate (`review_approval`) | Working |
+| 7b. Apply reviewer skip-flags | `ReadSegmentMetadata` | Implemented (filters out talks where the reviewer set `"skip": true` in metadata.json) |
 | 8. Assemble | `Assemble` | Implemented (ffmpeg filter_complex, re-cuts from source) |
 | 9. Human Review | Signal gate (`upload_approval`) | Working |
 | 10. Upload | `Upload` | Implemented (YouTube Data API v3 + captions + playlist) |

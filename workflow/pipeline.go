@@ -147,6 +147,44 @@ func PipelineWorkflow(ctx workflow.Context, input model.PipelineInput) (Pipeline
 		talkSegments = append(talkSegments, ps)
 	}
 
+	// Step 7b: Honour reviewer-set `skip: true` edits to metadata.json. Same
+	// "read at the gate boundary so human edits win" pattern Upload uses.
+	// Gated behind workflow.GetVersion so workflows already past Step 7 when
+	// this filter was introduced replay cleanly (they take the no-op branch
+	// and continue to Assemble unchanged).
+	if v := workflow.GetVersion(ctx, "add-skip-flag-filter", workflow.DefaultVersion, 1); v >= 1 && len(talkSegments) > 0 {
+		refs := make([]model.SegmentMetadataRef, len(talkSegments))
+		for i, ts := range talkSegments {
+			refs[i] = model.SegmentMetadataRef{
+				Index:        ts.Segment.Index,
+				SubtitlePath: ts.SubtitlePath,
+			}
+		}
+		var readOut model.ReadSegmentMetadataOutput
+		err := workflow.ExecuteActivity(actCtx, a.ReadSegmentMetadata, model.ReadSegmentMetadataInput{Segments: refs}).Get(ctx, &readOut)
+		if err != nil {
+			return PipelineResult{}, fmt.Errorf("read segment metadata: %w", err)
+		}
+		skipByIndex := make(map[int]bool, len(readOut.Segments))
+		for _, sm := range readOut.Segments {
+			skipByIndex[sm.Index] = sm.Metadata.Skip
+		}
+		var kept []model.ProcessedSegment
+		var skippedIndices []int
+		for _, ts := range talkSegments {
+			if skipByIndex[ts.Segment.Index] {
+				skippedIndices = append(skippedIndices, ts.Segment.Index)
+				skippedCount++
+				continue
+			}
+			kept = append(kept, ts)
+		}
+		if len(skippedIndices) > 0 {
+			workflow.GetLogger(ctx).Info("Reviewer flagged segments to skip", "indices", skippedIndices)
+		}
+		talkSegments = kept
+	}
+
 	// Step 8: Fan-out Assemble for each talk segment.
 	assembleFutures := make([]workflow.Future, len(talkSegments))
 	for i, ts := range talkSegments {
