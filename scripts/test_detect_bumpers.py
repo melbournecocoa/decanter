@@ -115,6 +115,63 @@ def test_walk_forward_with_fast_fade():
     assert result == pytest_approx(0.4)
 
 
+def test_merge_silence_empty_returns_empty():
+    assert db.merge_silence_regions([]) == []
+
+
+def test_merge_silence_single_long_region_kept():
+    region = [(100.0, 115.0)]
+    assert db.merge_silence_regions(region) == [(100.0, 115.0)]
+
+
+def test_merge_silence_single_short_region_dropped():
+    # Below SILENCE_MIN_DURATION post-merge → filtered out.
+    region = [(100.0, 105.0)]
+    assert db.merge_silence_regions(region) == []
+
+
+def test_merge_silence_two_close_regions_merge():
+    # Gap = 1.0s, under SILENCE_MERGE_GAP → bridge into a single region.
+    regions = [(10.0, 18.0), (19.0, 23.0)]
+    assert db.merge_silence_regions(regions) == [(10.0, 23.0)]
+
+
+def test_merge_silence_two_far_regions_stay_separate():
+    # Gap = 5.0s, well above SILENCE_MERGE_GAP → kept as two regions.
+    # Both ≥ SILENCE_MIN_DURATION on their own.
+    regions = [(0.0, 12.0), (17.0, 30.0)]
+    assert db.merge_silence_regions(regions) == [(0.0, 12.0), (17.0, 30.0)]
+
+
+def test_merge_silence_combined_still_below_min_dropped():
+    # Two tiny regions merge but the total is still under SILENCE_MIN_DURATION.
+    regions = [(0.0, 2.0), (3.0, 5.0)]
+    assert db.merge_silence_regions(regions) == []
+
+
+def test_merge_silence_gap_at_max_gap_threshold_merges():
+    # Boundary case: gap == SILENCE_MERGE_GAP → merge (inclusive).
+    regions = [(0.0, 5.0), (0.0 + 5.0 + db.SILENCE_MERGE_GAP, 15.0)]
+    merged = db.merge_silence_regions(regions)
+    assert len(merged) == 1
+    assert merged[0][0] == 0.0
+
+
+def test_merge_silence_recovers_intermittent_narration_over_bumper():
+    # Reproduces the workflow decanter-yt-20260524-210157 failure at 12:08:
+    # MC narrates over the bumper, splitting silence into three fragments,
+    # each below SILENCE_MIN_DURATION. After merging, the combined window
+    # spans >= SILENCE_MIN_DURATION and the bumper is detectable.
+    regions = [
+        (706.99, 713.93),  # 6.94s
+        (715.66, 720.88),  # 5.22s, gap 1.73s
+        (720.89, 725.25),  # 4.36s, gap 0.01s
+    ]
+    merged = db.merge_silence_regions(regions)
+    assert merged == [(706.99, 725.25)]
+    assert merged[0][1] - merged[0][0] >= db.SILENCE_MIN_DURATION
+
+
 def pytest_approx(value: float, tol: float = 1e-6):
     """Tiny approx helper to avoid importing pytest.approx (keeps test
     deterministic with FINE_STEP-aligned timestamps)."""

@@ -24,7 +24,21 @@ from pathlib import Path
 from typing import Callable
 
 SILENCE_NOISE_DB = -40
-SILENCE_MIN_DURATION = 10
+
+# Passed to ffmpeg silencedetect's `d=` parameter. Smaller than
+# SILENCE_MIN_DURATION so individual fragments surface when narration
+# punctures the silence (pre-2025 streams did not mute the MC mic during
+# bumpers). merge_silence_regions then bridges adjacent fragments.
+SILENCE_CANDIDATE_DURATION = 2.0
+
+# Bridge fragments separated by short bursts of audio over a bumper. Tuned
+# from a 2021-era stream where MC narration broke a single visual bumper
+# silence into pieces with gaps of ~1.7s.
+SILENCE_MERGE_GAP = 2.0
+
+# Total merged-region duration that counts as a bumper anchor.
+SILENCE_MIN_DURATION = 10.0
+
 DHASH_SIZE = 16
 DHASH_THRESHOLD = 30
 PROBE_INTERVAL = 2  # seconds between coarse frame probes
@@ -48,7 +62,7 @@ def detect_silence(video_path: str) -> list[tuple[float, float]]:
     """Run ffmpeg silencedetect and parse silent regions from stderr."""
     cmd = [
         "ffmpeg", "-i", video_path,
-        "-af", f"silencedetect=noise={SILENCE_NOISE_DB}dB:d={SILENCE_MIN_DURATION}",
+        "-af", f"silencedetect=noise={SILENCE_NOISE_DB}dB:d={SILENCE_CANDIDATE_DURATION}",
         "-f", "null", "-",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -61,6 +75,30 @@ def detect_silence(video_path: str) -> list[tuple[float, float]]:
         regions.append((float(start), float(end)))
 
     return regions
+
+
+def merge_silence_regions(
+    regions: list[tuple[float, float]],
+    max_gap: float = SILENCE_MERGE_GAP,
+    min_duration: float = SILENCE_MIN_DURATION,
+) -> list[tuple[float, float]]:
+    """Bridge adjacent silence fragments and filter by total duration.
+
+    Older streams have the MC narrating over the bumper, breaking a single
+    visual bumper into multiple short silences. Fragments separated by
+    <= max_gap are merged; the result is filtered to regions spanning at
+    least min_duration so we don't probe random pauses inside talks.
+    """
+    if not regions:
+        return []
+    merged: list[tuple[float, float]] = [regions[0]]
+    for start, end in regions[1:]:
+        last_start, last_end = merged[-1]
+        if start - last_end <= max_gap:
+            merged[-1] = (last_start, end)
+        else:
+            merged.append((start, end))
+    return [(s, e) for s, e in merged if e - s >= min_duration]
 
 
 def extract_frame(video_path: str, timestamp: float, output_path: str) -> bool:
@@ -203,8 +241,15 @@ def main():
 
     # Step 1: Find silent regions
     print(f"Detecting silence in {video_path}...", file=sys.stderr)
-    silence_regions = detect_silence(video_path)
-    print(f"Found {len(silence_regions)} silent regions", file=sys.stderr)
+    candidates = detect_silence(video_path)
+    print(f"Found {len(candidates)} silence candidates", file=sys.stderr)
+    silence_regions = merge_silence_regions(candidates)
+    if len(silence_regions) != len(candidates):
+        print(
+            f"After merging gaps <= {SILENCE_MERGE_GAP}s and filtering "
+            f">= {SILENCE_MIN_DURATION}s: {len(silence_regions)} regions",
+            file=sys.stderr,
+        )
 
     # Step 2: Refine each silence region with visual boundary detection
     bumpers = []
