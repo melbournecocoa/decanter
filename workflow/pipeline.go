@@ -73,17 +73,9 @@ func PipelineWorkflow(ctx workflow.Context, input model.PipelineInput) (Pipeline
 	// Step 2b: Look up the matching Meetup event (best-effort agenda source
 	// for GatherMetadata — anonymous GraphQL, hard-fails on API errors only).
 	// Runs before the review gate so the reviewer sees the matched agenda.
-	//
-	// Gated behind workflow.GetVersion so workflows that were already
-	// in-flight when this activity was introduced can replay their existing
-	// history cleanly (they skip the new branch and never call
-	// FetchMeetupEvent). New workflows record the marker and run it.
 	var meetupOutput model.FetchMeetupEventOutput
-	if v := workflow.GetVersion(ctx, "add-fetch-meetup-event", workflow.DefaultVersion, 1); v >= 1 {
-		err := workflow.ExecuteActivity(actCtx, a.FetchMeetupEvent, model.FetchMeetupEventInput{}).Get(ctx, &meetupOutput)
-		if err != nil {
-			return PipelineResult{}, fmt.Errorf("fetch meetup event failed: %w", err)
-		}
+	if err := workflow.ExecuteActivity(actCtx, a.FetchMeetupEvent, model.FetchMeetupEventInput{}).Get(ctx, &meetupOutput); err != nil {
+		return PipelineResult{}, fmt.Errorf("fetch meetup event failed: %w", err)
 	}
 
 	// Step 3: Detect bumpers.
