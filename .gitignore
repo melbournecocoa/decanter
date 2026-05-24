@@ -1,0 +1,51 @@
+# Binaries
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Build output
+/cmd/worker/worker
+/worker
+
+# Working directory
+workspace
+
+# Local environment
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Claude Code local settings
+.claude/
+
+# Local-only docs (plans, specs, agent-team notes)
+/docs/plans/
+/docs/specs/
+/docs/superpowers/
+
+# Source files for intro/outro renders — keep working copies locally,
+# ship only the rendered .m4v assets in the repo.
+/assets/Intro/
+/assets/Outro/
