@@ -33,6 +33,11 @@ func (a *Activities) Download(ctx context.Context, input model.DownloadInput) (m
 		"--newline",
 		"--merge-output-format", "mp4",
 		"--write-info-json",
+		// Enable the EJS remote-components solver (runs via the installed deno)
+		// so yt-dlp can crack YouTube's JS `n` challenge. Without it the
+		// challenge goes unsolved, YouTube serves throttled/broken format URLs,
+		// and downloads die mid-stream ("N bytes read, M more expected").
+		"--remote-components", "ejs:github",
 		"-o", outputPath,
 		input.YouTubeURL,
 	)
