@@ -54,6 +54,50 @@ Instructions:
 
 SRT file path: `
 
+// buildGatherMetadataPrompt assembles the prompt sent to the claude CLI: the
+// fixed instruction block followed by the SRT path, and the Meetup event path
+// when one is available. Extracted so the trim-accuracy validation test runs
+// the exact prompt production uses.
+func buildGatherMetadataPrompt(srtPath, meetupPath string) string {
+	prompt := gatherMetadataPrompt + srtPath
+	if meetupPath != "" {
+		prompt += "\nMeetup event JSON file path: " + meetupPath
+	}
+	return prompt
+}
+
+// gatherMetadataCommand builds the claude CLI invocation for metadata
+// extraction. Extracted so the validation test invokes the model identically to
+// production (same model, flags, and environment scrubbing).
+func gatherMetadataCommand(ctx context.Context, prompt string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "claude",
+		"-p", prompt,
+		"--output-format", "text",
+		"--model", "sonnet",
+		"--no-session-persistence",
+		"--allowedTools", "Read,Write",
+	)
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
+	return cmd
+}
+
+// applyTrimFallback fills metadata.Trim with the mechanical rough-cut default
+// when the model did not propose a trim (Trim == nil). The default spans the
+// whole rough segment (StartSeconds = StartOffset, EndSeconds = StartOffset +
+// segment duration), reproducing the behaviour before transcript-driven trim
+// detection. Returns true if it modified metadata (caller must persist), false
+// when a model-proposed trim is already present and must be preserved verbatim.
+func applyTrimFallback(metadata *model.TalkMetadata, seg model.Segment) bool {
+	if metadata.Trim != nil {
+		return false
+	}
+	metadata.Trim = &model.TrimRange{
+		StartSeconds: seg.StartOffset,
+		EndSeconds:   seg.StartOffset + (seg.End - seg.Start),
+	}
+	return true
+}
+
 func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetadataInput) (model.GatherMetadataOutput, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("Gathering metadata", "segmentIndex", input.Segment.Index)
@@ -77,18 +121,12 @@ func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetad
 		}
 	}()
 
-	prompt := gatherMetadataPrompt + srtPath
+	meetupPath := ""
 	if input.MeetupEventPath != "" {
-		prompt += "\nMeetup event JSON file path: " + filepath.Join(wsDir, input.MeetupEventPath)
+		meetupPath = filepath.Join(wsDir, input.MeetupEventPath)
 	}
-	cmd := exec.CommandContext(ctx, "claude",
-		"-p", prompt,
-		"--output-format", "text",
-		"--model", "sonnet",
-		"--no-session-persistence",
-		"--allowedTools", "Read,Write",
-	)
-	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
+	prompt := buildGatherMetadataPrompt(srtPath, meetupPath)
+	cmd := gatherMetadataCommand(ctx, prompt)
 
 	if err := cmd.Run(); err != nil {
 		close(done)
@@ -116,15 +154,12 @@ func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetad
 		return model.GatherMetadataOutput{}, fmt.Errorf("parse metadata JSON: %w\ncontent: %s", err, string(raw))
 	}
 
-	// Pre-populate trim defaults so the reviewer sees rough-cut-relative
-	// reference numbers in metadata.json. Defaults reproduce current behaviour;
-	// any edit before review_approval shifts the Assemble cut points.
-	if metadata.Trim == nil {
-		seg := input.Segment
-		metadata.Trim = &model.TrimRange{
-			StartSeconds: seg.StartOffset,
-			EndSeconds:   seg.StartOffset + (seg.End - seg.Start),
-		}
+	// The prompt asks the model to set trim to the detected presentation
+	// boundaries. If it omitted trim, fall back to the mechanical rough-cut
+	// default (reproduces pre-trim-detection behaviour). When the model DID set
+	// trim, applyTrimFallback leaves it untouched so we never clobber the
+	// proposal, and the file already on disk is authoritative — no rewrite.
+	if applyTrimFallback(&metadata, input.Segment) {
 		out, err := json.MarshalIndent(metadata, "", "  ")
 		if err != nil {
 			return model.GatherMetadataOutput{}, fmt.Errorf("marshal metadata with trim defaults: %w", err)
