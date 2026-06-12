@@ -188,7 +188,7 @@ const reviewerNotesFooter = `
 Before approving the review gate, edit ` + "`metadata.json`" + ` to apply either of the following.
 
 - **Skip this talk entirely.** Set ` + "`\"skip\": true`" + ` in ` + "`metadata.json`" + ` to exclude this segment from assembly and upload. The metadata extraction may have already done this for you — if it identified the segment as an MC handoff to the next speaker, you'll find ` + "`\"skip\": true`" + ` in ` + "`metadata.json`" + ` and a ` + "`## Skip Decision`" + ` section at the top of this file explaining why. Audit the decision (cross-check the SRT against the agenda) and flip it back to ` + "`false`" + ` if you disagree. Set ` + "`skip`" + ` yourself for the other case the LLM won't catch: a speaker who has withheld consent for individual upload. The pipeline counts skipped segments and moves on.
-- **Adjust trim points.** ` + "`trim.startSeconds`" + ` and ` + "`trim.endSeconds`" + ` are pre-filled with the auto-detected rough-cut boundaries (in rough-segment local time, i.e. seconds from the start of segments/segment-NN.mp4). Edit either to shift where Assemble cuts.
+- **Adjust trim points.** ` + "`trim.startSeconds`" + ` and ` + "`trim.endSeconds`" + ` are pre-filled with Claude's detected presentation boundaries — where the speaker actually starts and finishes (Q&A kept; bumper bleed, MC handoffs and trailing silence cut). See the ` + "`## Trim Decision`" + ` section above for the cues it used and any low-confidence flags worth checking. Values are in rough-segment local time (seconds from the start of segments/segment-NN.mp4). Edit either to shift where Assemble cuts.
 `
 
 // appendReviewerNotes appends the fixed reviewer cheat-sheet footer to the
