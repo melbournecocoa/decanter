@@ -37,9 +37,14 @@ const melbourneTZ = "Australia/Melbourne"
 
 // meetupGraphQLQuery requests the fields we persist. Kept verbatim as a
 // constant so the wire payload is greppable.
+// The status filter lives inside $filter (GroupEventFilter.status is a list)
+// rather than the top-level events(status:) arg (a single enum). [PAST, ACTIVE]
+// matches both historical reprocessing (PAST) and same-night imports where the
+// event is still ACTIVE — Meetup only flips to PAST once the *scheduled* end
+// time passes, and our events run ~90 min but are scheduled for 2 hours.
 const meetupGraphQLQuery = `query($urlname: String!, $filter: GroupEventFilter!) {
   groupByUrlname(urlname: $urlname) {
-    events(first: 20, status: PAST, filter: $filter) {
+    events(first: 20, filter: $filter) {
       edges { node { id title dateTime endTime eventUrl description } }
     }
   }
@@ -100,9 +105,10 @@ func (a *Activities) FetchMeetupEvent(ctx context.Context, _ model.FetchMeetupEv
 		Query: meetupGraphQLQuery,
 		Variables: map[string]interface{}{
 			"urlname": a.MeetupGroupURLName,
-			"filter": map[string]string{
+			"filter": map[string]interface{}{
 				"afterDateTime":  dayStart,
 				"beforeDateTime": dayEnd,
+				"status":         []string{"PAST", "ACTIVE"},
 			},
 		},
 	})
@@ -153,7 +159,7 @@ func (a *Activities) FetchMeetupEvent(ctx context.Context, _ model.FetchMeetupEv
 	edges := parsed.Data.Group.Events.Edges
 	switch len(edges) {
 	case 0:
-		logger.Warn("No PAST events on recording date", "date", ev.RecordingDate)
+		logger.Warn("No matching events on recording date", "date", ev.RecordingDate)
 		if err := writeMeetupMarker(outPath); err != nil {
 			return model.FetchMeetupEventOutput{}, err
 		}
@@ -170,7 +176,7 @@ func (a *Activities) FetchMeetupEvent(ctx context.Context, _ model.FetchMeetupEv
 		for _, e := range edges {
 			titles = append(titles, e.Node.Title)
 		}
-		logger.Warn("Multiple PAST events on recording date — refusing to guess",
+		logger.Warn("Multiple matching events on recording date — refusing to guess",
 			"date", ev.RecordingDate, "candidates", titles)
 		if err := writeMeetupMarker(outPath); err != nil {
 			return model.FetchMeetupEventOutput{}, err

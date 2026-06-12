@@ -113,6 +113,11 @@ func TestFetchMeetupEvent_HappyPath_SingleMatch(t *testing.T) {
 		before, _ := filter["beforeDateTime"].(string)
 		assert.True(t, strings.HasPrefix(after, "2026-05-14T00:00:00"), "after should be start of Melbourne day, got %s", after)
 		assert.True(t, strings.HasPrefix(before, "2026-05-14T23:59:59"), "before should be end of Melbourne day, got %s", before)
+		// Status must be filtered to [PAST, ACTIVE] — ACTIVE catches same-night
+		// imports where the event hasn't yet passed its scheduled end time.
+		statuses, ok := filter["status"].([]interface{})
+		require.True(t, ok, "filter.status should be a list")
+		assert.ElementsMatch(t, []interface{}{"PAST", "ACTIVE"}, statuses)
 
 		_, _ = w.Write([]byte(graphqlEvent(want)))
 	}))
