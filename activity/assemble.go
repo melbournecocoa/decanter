@@ -185,9 +185,18 @@ func (a *Activities) Assemble(ctx context.Context, input model.AssembleInput) (m
 		"-filter_complex", filterComplex,
 		"-map", "[outv]",
 		"-map", "[outa]",
-		"-c:v", "libx264",
-		"-preset", "medium",
-		"-crf", "20",
+		// Encode on the Apple Silicon media engine (h264_videotoolbox), not
+		// libx264. The CPU-bound x264 path oversubscribed the M1 Pro under the
+		// parallel Assemble fan-out and ran sub-realtime; offloading the encode
+		// to the dedicated HW engine frees the cores for the filter graphs
+		// (xfade/loudnorm run on CPU regardless of encoder). VideoToolbox has no
+		// -crf/-preset — it's bitrate-driven, and being less efficient per-bit
+		// than x264 we target a generous 12M for these low-motion slides +
+		// talking-head cuts. -allow_sw falls back to software encode if the
+		// hardware engine is unavailable.
+		"-c:v", "h264_videotoolbox",
+		"-b:v", "12M",
+		"-allow_sw", "1",
 		"-pix_fmt", "yuv420p",
 		"-profile:v", "high",
 		"-level", "4.0",
