@@ -31,6 +31,7 @@ Instructions:
   "speaker": "The speaker's full name",
   "description": "A 2-3 sentence summary of the talk content",
   "tags": ["relevant", "topic", "tags"],
+  "trim": {"startSeconds": 28.0, "endSeconds": 1882.8},
   "chapters": [
     {"time": 123.4, "title": "Short chapter title"}
   ]
@@ -47,10 +48,15 @@ Instructions:
    - Do NOT produce a generic "Introduction" / "Intro" chapter. The final video opens with a sponsor bumper followed by a hardcoded "Intro" marker at 0:00, so a chapter named Introduction near the start would be visibly redundant. Begin your chapters at the first substantive section transition instead (e.g. the speaker moving from self-intro into background, problem statement, demo, etc.).
    - Chapters are REQUIRED for any talk longer than ~20 minutes. Identify topic shifts even when the speaker doesn't explicitly announce them — moving between distinct projects, demos, frameworks, or subjects all count as chapter boundaries. Use the description you're writing as a guide: if the description enumerates multiple topics, those are your chapters.
    - Omit the "chapters" field entirely only if the talk is genuinely short (under ~15 minutes).
+   - All chapter "time" values must fall within the trim window you set in "trim" (see the next step) — i.e. between "startSeconds" and "endSeconds". Never place a chapter before "startSeconds".
    - If you are setting "skip": true, chapters are not required — the segment will not be assembled or uploaded.
-10. Write ONLY valid JSON to the metadata.json file — no markdown, no commentary.
-11. Also write a "metadata_reasoning.md" file in the same directory explaining your key decisions: how you chose the title and speaker (and specifically whether you used a Meetup agenda match — name the matched agenda entry; or note "no agenda available" / "no confident match"), which boundaries became chapters and why (or, if applicable, why you omitted chapters), and any judgement calls on tags. Keep it brief — a few short paragraphs or a bulleted list. This file is read by a human reviewer before the video is assembled. If you set "skip": true above, begin this file with the "## Skip Decision" section described in step 8 before any other reasoning.
-12. When done, reply with just the word "done".
+10. **Trim boundaries — when the presentation actually starts and ends.** The SRT was transcribed from a rough-cut segment file that includes extra material at each end: an opening sponsor bumper, setup chatter, possibly an MC introducing this speaker, and at the tail an MC introducing the *next* speaker, the next speaker's audio bleeding in, or trailing dead air / silence (sometimes the speaker just unplugs and walks off before the closing bumper fires). Set "trim" so it spans only the actual presentation. Both values are in seconds, taken directly from the SRT timestamps you read:
+   - "startSeconds" = the start timestamp of the speaker's first words *to the audience* — their greeting or first substantive sentence (e.g. "Hi everyone, thanks for coming", "So tonight I want to talk about ..."). Everything before it is trimmed: bumper-bleed text (meme intros, a raffle or giveaway carried over from the previous segment), pure logistics ("are we good to go?", mic checks), and any incoming MC handoff ("take it away Ben", "please welcome ..."). A speaker greeting or thanking the audience IS the start — that is not faff.
+   - "endSeconds" = the end timestamp of the speaker's last real content. This INCLUDES any audience Q&A the speaker takes — Q&A is part of the talk and must NOT be cut. Everything after the natural end of the presentation is trimmed: an MC handing off to the next speaker, the next speaker bleeding in, and trailing dead air or silence.
+   - Cut tight when you are confident. When a boundary is genuinely ambiguous — the speaker false-starts and restarts, rambles through preamble before truly beginning, or the Q&A blurs into the MC taking over — still set your best-guess value, but flag it in the "## Trim Decision" section (see below) so the human reviewer knows to check it.
+11. Write ONLY valid JSON to the metadata.json file — no markdown, no commentary.
+12. Also write a "metadata_reasoning.md" file in the same directory explaining your key decisions: how you chose the title and speaker (and specifically whether you used a Meetup agenda match — name the matched agenda entry; or note "no agenda available" / "no confident match"), which boundaries became chapters and why (or, if applicable, why you omitted chapters), and any judgement calls on tags. Include a "## Trim Decision" section recording the "startSeconds" and "endSeconds" you chose, the verbatim SRT line you cut on at each boundary, and a confidence call (high or low); if low, say what made the boundary ambiguous so the reviewer knows to check it. Keep the whole file brief — a few short paragraphs or a bulleted list. This file is read by a human reviewer before the video is assembled. If you set "skip": true above, begin this file with the "## Skip Decision" section described in step 8 before any other reasoning (in that case omit the "## Trim Decision" section — the segment will not be assembled).
+13. When done, reply with just the word "done".
 
 SRT file path: `
 
