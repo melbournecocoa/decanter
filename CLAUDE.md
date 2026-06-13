@@ -11,6 +11,7 @@ Automated pipeline to split CocoaHeads Melbourne YouTube live stream archives in
 - **Run worker:** `go run ./cmd/worker` (requires Temporal server)
 - **Trigger workflow (YouTube):** `tctl workflow start --taskqueue decanter-pipeline --workflow_type PipelineWorkflow --input '{"YouTubeURL":"https://..."}'`
 - **Trigger workflow (local file):** drop the file into `$DECANTER_WORKSPACE_PATH/imports/<name>.mp4`, then `tctl workflow start --taskqueue decanter-pipeline --workflow_type PipelineWorkflow --input '{"LocalFileName":"<name>.mp4"}'`
+- **Run review console:** `./ui.sh` (serves http://127.0.0.1:8780 against the local workspace)
 
 ## Architecture
 

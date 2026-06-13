@@ -103,3 +103,18 @@ The pipeline ships with intro/outro/bumper media branded for Melbourne CocoaHead
 ```bash
 go test ./... -v
 ```
+
+## Review Console
+
+A local web UI for reviewing and approving pipeline runs — preview segments with
+their proposed trims drawn on a timeline, edit metadata, approve at both gates,
+preview final videos with subtitles, and run the well-trodden recovery resets.
+
+```bash
+./ui.sh            # serves http://127.0.0.1:8780
+./ui.sh --addr 127.0.0.1:9000
+```
+
+Reads `DECANTER_WORKSPACE_PATH` (default `./workspace`) and `TEMPORAL_ADDRESS`.
+Reading runs works offline; approving and resetting shell out to the `temporal`
+CLI (must be on `PATH`). Binds to localhost only — single user, no auth.
