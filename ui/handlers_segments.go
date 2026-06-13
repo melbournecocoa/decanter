@@ -54,7 +54,3 @@ func (s *Server) handlePutMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
-
-// registerMediaRoutes is a temporary stub — Task 13 replaces it (in video.go)
-// with the real video/subtitles/thumbnail routes and DELETES this stub.
-func (s *Server) registerMediaRoutes(mux *http.ServeMux) {}

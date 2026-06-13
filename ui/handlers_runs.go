@@ -14,6 +14,8 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func decodeJSON(r *http.Request, v any) error { return json.NewDecoder(r.Body).Decode(v) }
+
 func (s *Server) registerRunRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
 	mux.HandleFunc("GET /api/runs/{wf}", s.handleRunDetail)
