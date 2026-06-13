@@ -35,8 +35,7 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Temporary route-group stubs — replaced in Tasks 11–15.
-func (s *Server) registerRunRoutes(mux *http.ServeMux)     {}
+// Temporary route-group stubs — replaced in Tasks 12–15.
 func (s *Server) registerSegmentRoutes(mux *http.ServeMux) {}
 func (s *Server) registerControlRoutes(mux *http.ServeMux) {}
 
