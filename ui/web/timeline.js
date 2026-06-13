@@ -1,7 +1,11 @@
 // initTimeline draws a trim bar in segment-file seconds over the video duration.
 // Handles drag on the in/out handles, keyboard set-in (i) / set-out (o) at the
 // playhead, shows chapter ticks, and writes trim back via onChange (debounced).
+let _timelineAbort = null;
 function initTimeline(opts) {
+  if (_timelineAbort) _timelineAbort.abort();
+  _timelineAbort = new AbortController();
+  const _sig = _timelineAbort.signal;
   const { video, mount, readout, chapters } = opts;
   let trim = opts.trim ? { ...opts.trim } : null;
   window.currentTrim = trim;
@@ -59,8 +63,8 @@ function initTimeline(opts) {
     if (dragging === 'in') trim.startSeconds = Math.min(t, trim.endSeconds - 0.1);
     else trim.endSeconds = Math.max(t, trim.startSeconds + 0.1);
     draw();
-  });
-  window.addEventListener('mouseup', () => { if (dragging) { dragging = null; commit(); } });
+  }, { signal: _sig });
+  window.addEventListener('mouseup', () => { if (dragging) { dragging = null; commit(); } }, { signal: _sig });
 
   // click on the bar (not a handle) scrubs the video
   bar.addEventListener('click', e => { if (!e.target.classList.contains('tl-h')) video.currentTime = xToTime(e.clientX); });
@@ -72,7 +76,7 @@ function initTimeline(opts) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     if (e.key === 'i') { ensureTrim(); trim.startSeconds = +video.currentTime.toFixed(3); draw(); commit(); }
     if (e.key === 'o') { ensureTrim(); trim.endSeconds = +video.currentTime.toFixed(3); draw(); commit(); }
-  });
+  }, { signal: _sig });
 
   renderChapters(); draw();
 }

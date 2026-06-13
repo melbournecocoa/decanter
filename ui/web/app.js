@@ -15,7 +15,7 @@ async function routeRuns() {
   const runs = await api('/api/runs');
   app.innerHTML = `<h2>Runs</h2><div class="runs">${runs.map(r => `
     <a class="run-row" href="#/run/${encodeURIComponent(r.workflowId)}">
-      <span class="badge b-${r.state.replace('_gate','')}">${r.state.replace('_',' ')}</span>
+      <span class="badge b-${r.state.replace('_gate','')}">${esc(r.state.replace('_',' '))}</span>
       <strong>${esc(r.eventName || r.workflowId)}</strong>
       <span style="color:var(--muted)">${esc(r.workflowId)}</span>
     </a>`).join('')}</div>`;
@@ -34,7 +34,7 @@ async function routeRun(wf) {
   }).join('');
   const gate = d.state;
   app.innerHTML = `<h2>${esc(d.event.eventName || wf)}</h2>
-    <p style="color:var(--muted)">${esc(wf)} · <span class="badge b-${gate.replace('_gate','')}">${gate.replace('_',' ')}</span></p>
+    <p style="color:var(--muted)">${esc(wf)} · <span class="badge b-${gate.replace('_gate','')}">${esc(gate.replace('_',' '))}</span></p>
     <h3>Segments</h3><div class="seg-strip">${strip}</div>
     <div id="bumpers-panel"></div>
     <div id="reset-panel"></div>`;
@@ -56,6 +56,22 @@ function router() {
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', router);
 
+// markBumperAtPlayhead converts the current segment-file playhead time to an
+// absolute source time (seg.Start - seg.StartOffset + playhead, matching
+// Assemble) and appends a zero-width bumper boundary there, so a missed bumper
+// can be fixed without manual coordinate maths. Then the operator runs Redo
+// Split from the run overview.
+async function markBumperAtPlayhead(wf, idx, video) {
+  const segs = await api(`/api/runs/${encodeURIComponent(wf)}/segment-timing`);
+  const seg = (segs || []).find(s => s.Index === idx);
+  if (!seg) { toast('No segment timing available (is the run still in Temporal?)'); return; }
+  const sourceT = seg.Start - seg.StartOffset + video.currentTime;
+  const bumpers = await api(`/api/runs/${encodeURIComponent(wf)}/bumpers`);
+  bumpers.push({ VisualStart: sourceT, VisualEnd: sourceT });
+  await api(`/api/runs/${encodeURIComponent(wf)}/bumpers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bumpers) });
+  toast(`Bumper boundary added at source ${sourceT.toFixed(2)}s — open the run overview and Redo Split`);
+}
+
 // --- Temporary stubs, replaced in later tasks ---
 async function routeSegment(wf, idx) {
   const [{ metadata, reasoning }, detail] = await Promise.all([
@@ -73,6 +89,7 @@ async function routeSegment(wf, idx) {
       <video id="vid" controls preload="metadata" src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/video"></video>
       <div id="timeline"></div>
       <div id="trimreadout" style="color:var(--muted);font-size:12px;margin-top:6px"></div>
+      <button class="btn" id="markbumper" style="margin-top:8px">⚑ Mark bumper boundary at playhead</button>
       ${reasoning ? `<details class="reason"><summary>metadata_reasoning.md</summary>${esc(reasoning)}</details>` : ''}
     </div>
     <div class="panel">
@@ -116,13 +133,20 @@ async function routeSegment(wf, idx) {
     await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'review', approved:true }) });
     toast('Review approved'); location.hash = `#/run/${encodeURIComponent(wf)}`;
   };
-  document.getElementById('reject').onclick = async () => {
-    await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'review', approved:false }) });
-    toast('Review rejected');
-  };
+  document.getElementById('reject').onclick = () => confirmDialog({
+    title: 'Reject review?',
+    bodyHTML: '<p>Rejecting <strong>fails the entire workflow run</strong> — it does not re-open the gate. You would need to start a new run.</p>',
+    confirmLabel: 'Reject & fail run',
+    onConfirm: async () => {
+      await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gate: 'review', approved: false }) });
+      toast('Review rejected — run failed');
+    },
+  });
   if (gate === 'upload_gate') document.getElementById('gatehint').textContent =
     'Parked at upload. Title/description/tags edits are picked up on upload — just re-approve there. A trim change needs a Redo Assemble (run it from the run overview).';
 
+  document.getElementById('markbumper').onclick = () =>
+    markBumperAtPlayhead(wf, idx, document.getElementById('vid')).catch(e => toast(e.message));
   initTimeline({ wf, idx, video: document.getElementById('vid'), mount: document.getElementById('timeline'),
     readout: document.getElementById('trimreadout'), trim: m.trim, chapters: m.chapters || [], onChange: () => save().catch(()=>{}) });
 }
@@ -169,10 +193,15 @@ async function routeUpload(wf, idx) {
     await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'upload', approved:true }) });
     toast('Upload approved'); location.hash = `#/run/${encodeURIComponent(wf)}`;
   };
-  document.getElementById('reject').onclick = async () => {
-    await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'upload', approved:false }) });
-    toast('Upload rejected');
-  };
+  document.getElementById('reject').onclick = () => confirmDialog({
+    title: 'Reject upload?',
+    bodyHTML: '<p>Rejecting <strong>fails the entire workflow run</strong> — it does not re-open the gate. You would need to start a new run.</p>',
+    confirmLabel: 'Reject & fail run',
+    onConfirm: async () => {
+      await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gate: 'upload', approved: false }) });
+      toast('Upload rejected — run failed');
+    },
+  });
 }
 function confirmDialog({ title, bodyHTML, confirmLabel, onConfirm }) {
   const back = document.createElement('div'); back.className = 'dialog-backdrop';
