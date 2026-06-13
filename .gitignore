@@ -24,6 +24,8 @@ go.work.sum
 # Build output
 /cmd/worker/worker
 /worker
+/cmd/decanter-ui/decanter-ui
+/decanter-ui
 
 # Working directory
 workspace
@@ -49,3 +51,6 @@ __pycache__/
 # ship only the rendered .m4v assets in the repo.
 /assets/Intro/
 /assets/Outro/
+
+# Visual brainstorming companion artefacts
+.superpowers/
