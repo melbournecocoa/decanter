@@ -35,8 +35,7 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Temporary route-group stubs — replaced in Tasks 12–15.
-func (s *Server) registerSegmentRoutes(mux *http.ServeMux) {}
+// Temporary route-group stub — replaced in Task 15.
 func (s *Server) registerControlRoutes(mux *http.ServeMux) {}
 
 // reqCtx is a small helper for handlers needing a request-scoped context.
