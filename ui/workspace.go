@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -31,3 +32,6 @@ func ThumbnailPath(base, wf string, idx int) string  { return filepath.Join(Proc
 
 func EventPath(base, wf string) string   { return filepath.Join(WorkspacePath(base, wf), "event.json") }
 func BumpersPath(base, wf string) string { return filepath.Join(WorkspacePath(base, wf), "bumpers.json") }
+
+// ensureDir creates dir (and parents) if missing.
+func ensureDir(dir string) error { return os.MkdirAll(dir, 0o755) }
