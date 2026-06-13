@@ -174,5 +174,61 @@ async function routeUpload(wf, idx) {
     toast('Upload rejected');
   };
 }
-function renderBumpersPanel(wf, d) { /* Task 20 */ }
-function renderResetPanel(wf, d) { /* Task 20 */ }
+function confirmDialog({ title, bodyHTML, confirmLabel, onConfirm }) {
+  const back = document.createElement('div'); back.className = 'dialog-backdrop';
+  back.innerHTML = `<div class="dialog"><h3>${esc(title)}</h3>${bodyHTML}
+    <div class="row-actions"><button class="btn btn-go" id="dlg-ok">${esc(confirmLabel)}</button>
+    <button class="btn" id="dlg-cancel">Cancel</button></div></div>`;
+  document.body.appendChild(back);
+  back.querySelector('#dlg-cancel').onclick = () => back.remove();
+  back.querySelector('#dlg-ok').onclick = async () => { back.remove(); try { await onConfirm(); } catch (e) { toast(e.message); } };
+}
+
+function renderBumpersPanel(wf, detail) {
+  const el = document.getElementById('bumpers-panel');
+  let list = (detail.bumpers || []).map(b => ({ VisualStart: b.VisualStart, VisualEnd: b.VisualEnd }));
+  const rows = list.map((b, i) =>
+    `<div>#${i} <input data-i="${i}" data-k="VisualStart" value="${b.VisualStart}" style="width:90px"> →
+      <input data-i="${i}" data-k="VisualEnd" value="${b.VisualEnd}" style="width:90px">
+      <button class="btn" data-del="${i}">✕</button></div>`).join('');
+  el.innerHTML = `<details class="panel"><summary><strong>Bumpers</strong> (edit then Redo Split)</summary>
+    <div id="bump-rows">${rows || '<em>none</em>'}</div>
+    <div class="row-actions"><button class="btn" id="bump-add">+ Add boundary (source sec)</button>
+    <button class="btn" id="bump-save">Save bumpers.json</button></div></details>`;
+
+  const redraw = () => { detail.bumpers = list; renderBumpersPanel(wf, detail); };
+  el.querySelectorAll('input').forEach(inp => inp.onchange = () => {
+    list[+inp.dataset.i][inp.dataset.k] = parseFloat(inp.value);
+  });
+  el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { list.splice(+b.dataset.del, 1); redraw(); });
+  document.getElementById('bump-add').onclick = () => { const t = parseFloat(prompt('Source time (seconds):') || '0'); list.push({ VisualStart: t, VisualEnd: t }); redraw(); };
+  document.getElementById('bump-save').onclick = async () => {
+    try {
+      await api(`/api/runs/${encodeURIComponent(wf)}/bumpers`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(list) });
+      toast('bumpers.json saved');
+    } catch (e) { toast(e.message); }
+  };
+}
+
+function renderResetPanel(wf, detail) {
+  const el = document.getElementById('reset-panel');
+  el.innerHTML = `<div class="panel"><strong>Recovery resets</strong>
+    <div class="row-actions">
+      <button class="btn" id="r-split">Redo Split (missed bumper)</button>
+      <button class="btn" id="r-asm">Redo Assemble (trim fix)</button>
+    </div></div>`;
+  const doReset = async (recipe) => {
+    const prev = await api(`/api/runs/${encodeURIComponent(wf)}/reset/${recipe}`);
+    confirmDialog({
+      title: prev.label,
+      bodyHTML: `<p>${esc(prev.explanation)}</p><p>Resets to event <strong>${prev.targetEventId}</strong>, excluding old signals so the gates re-block.</p>${prev.command ? `<div class="cmd">${esc(prev.command)}</div>` : ''}`,
+      confirmLabel: 'Run reset',
+      onConfirm: async () => {
+        await api(`/api/runs/${encodeURIComponent(wf)}/reset/${recipe}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ targetEventId: prev.targetEventId }) });
+        toast('Reset issued'); setTimeout(() => router(), 800);
+      },
+    });
+  };
+  document.getElementById('r-split').onclick = () => doReset('redo-split').catch(e => toast(e.message));
+  document.getElementById('r-asm').onclick = () => doReset('redo-assemble').catch(e => toast(e.message));
+}
