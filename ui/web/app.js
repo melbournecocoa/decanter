@@ -23,10 +23,15 @@ async function routeRuns() {
 
 async function routeRun(wf) {
   const d = await api('/api/runs/' + encodeURIComponent(wf));
-  const strip = d.segments.map(s => `<a class="seg-chip" href="#/run/${encodeURIComponent(wf)}/seg/${s.index}">
-    <strong>${String(s.index).padStart(2,'0')}</strong>
-    <span class="badge b-${s.skip ? 'skip' : s.type}">${s.skip ? 'skip' : s.type}</span>
-    <div>${esc(s.title || '')}</div></a>`).join('');
+  const strip = d.segments.map(s => {
+    const up = s.type === 'talk'
+      ? `<a href="#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload" style="display:block;font-size:11px;margin-top:4px">▸ upload preview</a>`
+      : '';
+    return `<div class="seg-chip">
+      <a href="#/run/${encodeURIComponent(wf)}/seg/${s.index}"><strong>${String(s.index).padStart(2,'0')}</strong>
+      <span class="badge b-${s.skip ? 'skip' : s.type}">${s.skip ? 'skip' : s.type}</span>
+      <div>${esc(s.title || '')}</div></a>${up}</div>`;
+  }).join('');
   const gate = d.state;
   app.innerHTML = `<h2>${esc(d.event.eventName || wf)}</h2>
     <p style="color:var(--muted)">${esc(wf)} · <span class="badge b-${gate.replace('_gate','')}">${gate.replace('_',' ')}</span></p>
@@ -121,6 +126,53 @@ async function routeSegment(wf, idx) {
   initTimeline({ wf, idx, video: document.getElementById('vid'), mount: document.getElementById('timeline'),
     readout: document.getElementById('trimreadout'), trim: m.trim, chapters: m.chapters || [], onChange: () => save().catch(()=>{}) });
 }
-function routeUpload(wf, idx) { app.innerHTML = '<p>(upload review — Task 19)</p>'; }
+async function routeUpload(wf, idx) {
+  const { metadata } = await api(`/api/runs/${encodeURIComponent(wf)}/segments/${idx}/metadata`);
+  const detail = await api('/api/runs/' + encodeURIComponent(wf));
+  const gate = detail.state;
+  const m = metadata || {};
+  app.innerHTML = `
+  <p><a href="#/run/${encodeURIComponent(wf)}">← ${esc(detail.event.eventName || wf)}</a> · upload preview · segment ${String(idx).padStart(2,'0')}</p>
+  <div class="review">
+    <div class="player-col">
+      <video id="vid" controls preload="metadata" crossorigin="anonymous">
+        <source src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/final" type="video/mp4">
+        <track default kind="subtitles" srclang="en" label="English"
+               src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/subtitles">
+      </video>
+      <div class="row-actions">
+        <button class="btn" id="grabthumb">Use current frame as thumbnail</button>
+        <img id="thumb" src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/thumbnail" alt="" style="height:54px;border-radius:4px;border:1px solid var(--border)">
+      </div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">${esc(m.title || '')}</h3>
+      <p style="color:var(--muted)">${esc(m.speaker || '')}</p>
+      <p style="white-space:pre-wrap">${esc(m.description || '')}</p>
+      <div class="chips">${(m.tags||[]).map(t => `<span>${esc(t)}</span>`).join('')}</div>
+      ${(m.chapters||[]).length ? `<h4>Chapters</h4>${m.chapters.map(c => `<div>${esc(c.title)} — ${Math.floor(c.time/60)}:${String(Math.floor(c.time%60)).padStart(2,'0')}</div>`).join('')}` : ''}
+      <div class="row-actions">
+        <button class="btn btn-go" id="approve" ${gate==='upload_gate'?'':'disabled'}>✓ Approve upload</button>
+        <button class="btn btn-no" id="reject" ${gate==='upload_gate'?'':'disabled'}>Reject</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('grabthumb').onclick = async () => {
+    const t = document.getElementById('vid').currentTime;
+    await api(`/api/runs/${encodeURIComponent(wf)}/segments/${idx}/thumbnail`,
+      { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ seconds: t }) });
+    document.getElementById('thumb').src = `/api/runs/${encodeURIComponent(wf)}/segments/${idx}/thumbnail?ts=${Date.now()}`;
+    toast('Thumbnail updated');
+  };
+  document.getElementById('approve').onclick = async () => {
+    await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'upload', approved:true }) });
+    toast('Upload approved'); location.hash = `#/run/${encodeURIComponent(wf)}`;
+  };
+  document.getElementById('reject').onclick = async () => {
+    await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'upload', approved:false }) });
+    toast('Upload rejected');
+  };
+}
 function renderBumpersPanel(wf, d) { /* Task 20 */ }
 function renderResetPanel(wf, d) { /* Task 20 */ }
