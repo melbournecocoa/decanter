@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/melbournecocoa/decanter/model"
 )
@@ -61,9 +64,31 @@ func (s *Server) registerApprovalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/runs/{wf}/reset/{recipe}", s.handleResetExecute)
 }
 
+type httpError struct {
+	code int
+	msg  string
+}
+
+func (e *httpError) Error() string { return e.msg }
+
+var errBadRecipe = &httpError{code: http.StatusNotFound, msg: "unknown reset recipe"}
+
+// currentState fetches status + history and classifies the run. Requires Temporal.
+func (s *Server) currentState(r *http.Request, wf string) (GateState, string, error) {
+	status, err := s.Temporal.Status(r.Context(), wf)
+	if err != nil {
+		return GateUnknown, "", err
+	}
+	events, err := s.Temporal.History(r.Context(), wf, "")
+	if err != nil {
+		return GateUnknown, status, err
+	}
+	return classifyState(summarizeHistory(events), status), status, nil
+}
+
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
-	if s.Control == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "control unavailable"})
+	if s.Control == nil || s.Temporal == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "control/temporal unavailable"})
 		return
 	}
 	var body struct {
@@ -78,21 +103,26 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "gate must be review|upload"})
 		return
 	}
-	if err := s.Control.Signal(r.Context(), r.PathValue("wf"), body.Gate, body.Approved); err != nil {
+	wf := r.PathValue("wf")
+	state, _, err := s.currentState(r, wf)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	wantGate := GateReview
+	if body.Gate == "upload" {
+		wantGate = GateUpload
+	}
+	if state != wantGate {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("run not parked at %s gate (current state: %s)", body.Gate, state)})
+		return
+	}
+	if err := s.Control.Signal(r.Context(), wf, body.Gate, body.Approved); err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signalled"})
 }
-
-type httpError struct {
-	code int
-	msg  string
-}
-
-func (e *httpError) Error() string { return e.msg }
-
-var errBadRecipe = &httpError{code: http.StatusNotFound, msg: "unknown reset recipe"}
 
 // resetTarget resolves a recipe to its target WorkflowTaskStarted event id.
 func (s *Server) resetTarget(r *http.Request, wf, recipeKey string) (ResetRecipe, int64, error) {
@@ -108,21 +138,35 @@ func (s *Server) resetTarget(r *http.Request, wf, recipeKey string) (ResetRecipe
 	return recipe, id, err
 }
 
+// writeResetError writes an HTTP error response, honouring httpError.code.
+func writeResetError(w http.ResponseWriter, err error) {
+	var he *httpError
+	if errors.As(err, &he) {
+		writeJSON(w, he.code, map[string]string{"error": he.msg})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+}
+
 func (s *Server) handleResetPreview(w http.ResponseWriter, r *http.Request) {
 	if s.Temporal == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "temporal unavailable"})
 		return
 	}
-	recipe, id, err := s.resetTarget(r, r.PathValue("wf"), r.PathValue("recipe"))
+	wf := r.PathValue("wf")
+	recipe, id, err := s.resetTarget(r, wf, r.PathValue("recipe"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeResetError(w, err)
 		return
 	}
+	reason := "decanter-ui: " + recipe.Key
+	command := "temporal " + strings.Join(buildResetArgs(s.Addr, wf, id, reason), " ")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"recipe":        recipe.Key,
 		"label":         recipe.Label,
 		"explanation":   recipe.Explanation,
 		"targetEventId": id,
+		"command":       command,
 	})
 }
 
@@ -132,9 +176,29 @@ func (s *Server) handleResetExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wf := r.PathValue("wf")
+	var body struct {
+		TargetEventID int64 `json:"targetEventId"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	status, err := s.Temporal.Status(r.Context(), wf)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if status != "Running" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not Running (current: " + status + ")"})
+		return
+	}
 	recipe, id, err := s.resetTarget(r, wf, r.PathValue("recipe"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeResetError(w, err)
+		return
+	}
+	if body.TargetEventID != id {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "history moved since preview; re-open the confirm dialog", "targetEventId": id})
 		return
 	}
 	reason := "decanter-ui: " + recipe.Key

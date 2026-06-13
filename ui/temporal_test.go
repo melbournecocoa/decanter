@@ -54,6 +54,10 @@ func childInitiated(id int64) *historypb.HistoryEvent {
 	}
 }
 
+func childCompleted(id int64) *historypb.HistoryEvent {
+	return &historypb.HistoryEvent{EventId: id, EventType: enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED}
+}
+
 func TestSummarizeHistory(t *testing.T) {
 	events := []*historypb.HistoryEvent{
 		schedActivity(5, "DetectBumpers"),

@@ -11,9 +11,15 @@ func TestClassifyState(t *testing.T) {
 	}{
 		{
 			name:   "review gate: children done, no assemble, no review signal",
-			sum:    HistorySummary{ChildrenInitiated: 4, ScheduledActivities: map[string]int{}, Signals: map[string]int{}},
+			sum:    HistorySummary{ChildrenInitiated: 4, ChildrenClosed: 4, ScheduledActivities: map[string]int{}, Signals: map[string]int{}},
 			status: "Running",
 			want:   GateReview,
+		},
+		{
+			name:   "still running: children initiated but not all closed",
+			sum:    HistorySummary{ChildrenInitiated: 4, ChildrenClosed: 1, ScheduledActivities: map[string]int{}, Signals: map[string]int{}},
+			status: "Running",
+			want:   GateRunning,
 		},
 		{
 			name:   "upload gate: review signalled, assemble done, no upload signal",

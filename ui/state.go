@@ -19,6 +19,7 @@ type HistorySummary struct {
 	CompletedActivities map[string]int // activity type name -> count completed
 	Signals             map[string]int // signal name -> count received
 	ChildrenInitiated   int            // StartChildWorkflowExecutionInitiated count
+	ChildrenClosed      int            // ChildWorkflowExecutionCompleted count
 }
 
 func (s HistorySummary) scheduled(name string) bool { return s.ScheduledActivities[name] > 0 }
@@ -41,8 +42,10 @@ func classifyState(sum HistorySummary, status string) GateState {
 		if sum.signalled("review_approval") && sum.completed("Assemble") && !sum.signalled("upload_approval") {
 			return GateUpload
 		}
-		// review gate: children fanned out, assemble not yet scheduled, no review approval.
-		if sum.ChildrenInitiated > 0 && !sum.scheduled("Assemble") && !sum.signalled("review_approval") {
+		// review gate: children fanned out AND all closed, assemble not yet
+		// scheduled, no review approval.
+		if sum.ChildrenInitiated > 0 && sum.ChildrenClosed >= sum.ChildrenInitiated &&
+			!sum.scheduled("Assemble") && !sum.signalled("review_approval") {
 			return GateReview
 		}
 		return GateRunning

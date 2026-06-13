@@ -107,31 +107,26 @@ func summarizeHistory(events []*historypb.HistoryEvent) HistorySummary {
 		CompletedActivities: map[string]int{},
 		Signals:             map[string]int{},
 	}
+	schedNames := map[int64]string{} // scheduledEventId -> activity name
 	for _, e := range events {
 		switch e.GetEventType() {
 		case enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
-			sum.ScheduledActivities[e.GetActivityTaskScheduledEventAttributes().GetActivityType().GetName()]++
+			name := e.GetActivityTaskScheduledEventAttributes().GetActivityType().GetName()
+			sum.ScheduledActivities[name]++
+			schedNames[e.GetEventId()] = name
 		case enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
-			if name := activityNameForCompleted(events, e); name != "" {
+			if name := schedNames[e.GetActivityTaskCompletedEventAttributes().GetScheduledEventId()]; name != "" {
 				sum.CompletedActivities[name]++
 			}
 		case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED:
 			sum.Signals[e.GetWorkflowExecutionSignaledEventAttributes().GetSignalName()]++
 		case enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED:
 			sum.ChildrenInitiated++
+		case enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED:
+			sum.ChildrenClosed++
 		}
 	}
 	return sum
-}
-
-func activityNameForCompleted(events []*historypb.HistoryEvent, completed *historypb.HistoryEvent) string {
-	schedID := completed.GetActivityTaskCompletedEventAttributes().GetScheduledEventId()
-	for _, e := range events {
-		if e.GetEventId() == schedID && e.GetEventType() == enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED {
-			return e.GetActivityTaskScheduledEventAttributes().GetActivityType().GetName()
-		}
-	}
-	return ""
 }
 
 // SegmentsFromHistory decodes the Split activity's result payload from history,

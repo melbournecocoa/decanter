@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"embed"
 	"io/fs"
 	"net/http"
@@ -34,6 +33,3 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/", http.FileServer(http.FS(static)))
 	return mux
 }
-
-// reqCtx is a small helper for handlers needing a request-scoped context.
-func reqCtx(r *http.Request) context.Context { return r.Context() }
