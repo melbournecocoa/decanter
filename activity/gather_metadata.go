@@ -1,12 +1,15 @@
 package activity
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.temporal.io/sdk/activity"
@@ -104,6 +107,111 @@ func applyTrimFallback(metadata *model.TalkMetadata, seg model.Segment) bool {
 	return true
 }
 
+// Speech-onset detection tuning. The transcriber (Groq whisper-large-v3)
+// anchors the first SRT cue's start to 0.0, smearing any leading silence into
+// it — so the LLM, reading the SRT faithfully, proposes a trim start of 0.0 and
+// the assembled video opens with seconds of dead air. We recover the true onset
+// straight from the audio with ffmpeg silencedetect and floor the trim start at
+// it, keeping a small lead-in so we never clip the first word.
+const (
+	onsetSilenceNoiseDB    = "-35dB"
+	onsetSilenceMinDur     = "0.3"
+	onsetLeadInMargin      = 0.5 // seconds kept before the detected onset (clip safety / natural lead-in)
+	leadingSilenceMaxStart = 0.5 // a silence period counts as "leading" only if it begins within this many seconds of t=0
+)
+
+// parseSpeechOnset reads `ffmpeg silencedetect` stderr and returns the end of
+// the leading-silence region — i.e. when audio first begins — when the segment
+// opens with silence. ok=false means the head has sound from the top (nothing
+// to floor). It deliberately returns the end of the FIRST leading-silence
+// period: erring early (toward dead air) keeps the cut safe; a human tightens it.
+func parseSpeechOnset(stderr string) (float64, bool) {
+	var firstStart, firstEnd float64
+	haveStart, haveEnd := false, false
+	for _, line := range strings.Split(stderr, "\n") {
+		switch {
+		case !haveStart:
+			if v, ok := firstFloatAfter(line, "silence_start:"); ok {
+				firstStart, haveStart = v, true
+			}
+		case !haveEnd:
+			if v, ok := firstFloatAfter(line, "silence_end:"); ok {
+				firstEnd, haveEnd = v, true
+			}
+		}
+	}
+	if !haveStart || !haveEnd || firstStart > leadingSilenceMaxStart {
+		return 0, false
+	}
+	return firstEnd, true
+}
+
+// firstFloatAfter returns the first whitespace-delimited float that follows
+// marker on the line (e.g. "silence_end: 6.005417 | silence_duration: ...").
+func firstFloatAfter(line, marker string) (float64, bool) {
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(line[idx+len(marker):])
+	if len(fields) == 0 {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
+}
+
+// applyOnsetFloor raises metadata.Trim.StartSeconds to (onset - lead-in margin)
+// when the proposed start sits before the detected speech onset, clamped to
+// [0, EndSeconds). It is a floor: a legitimately-later start (the LLM skipping
+// raffle/MC bleed) is preserved. Returns true if it changed the trim.
+func applyOnsetFloor(metadata *model.TalkMetadata, onset float64) bool {
+	if metadata.Trim == nil {
+		return false
+	}
+	floor := onset - onsetLeadInMargin
+	if floor < 0 {
+		floor = 0
+	}
+	// Never floor a start at/after the talk's end (guards a nonsensical onset).
+	if floor >= metadata.Trim.EndSeconds {
+		return false
+	}
+	if metadata.Trim.StartSeconds >= floor {
+		return false
+	}
+	metadata.Trim.StartSeconds = floor
+	return true
+}
+
+// detectSpeechOnsetCommand builds the ffmpeg silencedetect invocation used to
+// find where audio begins in a rough-cut segment file. silencedetect writes its
+// report to stderr; the decode output is discarded to the null muxer.
+func detectSpeechOnsetCommand(ctx context.Context, segPath string) *exec.Cmd {
+	return exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-nostats",
+		"-i", segPath,
+		"-af", "silencedetect=noise="+onsetSilenceNoiseDB+":d="+onsetSilenceMinDur,
+		"-f", "null", "-",
+	)
+}
+
+// detectSpeechOnset runs silencedetect on segPath and returns the leading-silence
+// onset (see parseSpeechOnset). Best-effort: any ffmpeg failure yields ok=false
+// so onset detection can never break metadata gathering.
+func (a *Activities) detectSpeechOnset(ctx context.Context, segPath string) (float64, bool) {
+	cmd := detectSpeechOnsetCommand(ctx, segPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return 0, false
+	}
+	return parseSpeechOnset(stderr.String())
+}
+
 func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetadataInput) (model.GatherMetadataOutput, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("Gathering metadata", "segmentIndex", input.Segment.Index)
@@ -163,15 +271,33 @@ func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetad
 	// The prompt asks the model to set trim to the detected presentation
 	// boundaries. If it omitted trim, fall back to the mechanical rough-cut
 	// default (reproduces pre-trim-detection behaviour). When the model DID set
-	// trim, applyTrimFallback leaves it untouched so we never clobber the
-	// proposal, and the file already on disk is authoritative — no rewrite.
-	if applyTrimFallback(&metadata, input.Segment) {
+	// trim, applyTrimFallback leaves it untouched so we never clobber the proposal.
+	changed := applyTrimFallback(&metadata, input.Segment)
+
+	// The transcriber pins the first SRT cue to 0.0 (smearing leading silence),
+	// so the model's proposed trim start can land in dead air. Recover the true
+	// audio onset from the segment file and floor the start at it. This is a
+	// floor: a legitimately-later start (raffle/MC bleed the LLM skipped) is kept.
+	segPath := filepath.Join(wsDir, input.Segment.FilePath)
+	if onset, ok := a.detectSpeechOnset(ctx, segPath); ok {
+		if applyOnsetFloor(&metadata, onset) {
+			logger.Info("Floored trim start to detected speech onset",
+				"segmentIndex", input.Segment.Index, "onset", onset, "trimStart", metadata.Trim.StartSeconds)
+			changed = true
+		}
+	} else {
+		logger.Info("No leading-silence onset detected; leaving trim start as-is", "segmentIndex", input.Segment.Index)
+	}
+
+	// Persist if either the fallback filled the trim or the onset floor moved it.
+	// The file already on disk is authoritative when nothing changed — no rewrite.
+	if changed {
 		out, err := json.MarshalIndent(metadata, "", "  ")
 		if err != nil {
-			return model.GatherMetadataOutput{}, fmt.Errorf("marshal metadata with trim defaults: %w", err)
+			return model.GatherMetadataOutput{}, fmt.Errorf("marshal metadata with trim updates: %w", err)
 		}
 		if err := os.WriteFile(metadataPath, out, 0o644); err != nil {
-			return model.GatherMetadataOutput{}, fmt.Errorf("write metadata with trim defaults: %w", err)
+			return model.GatherMetadataOutput{}, fmt.Errorf("write metadata with trim updates: %w", err)
 		}
 	}
 
