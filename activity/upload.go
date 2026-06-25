@@ -81,7 +81,7 @@ func (a *Activities) Upload(ctx context.Context, input model.UploadInput) (model
 
 	description := buildDescription(metadata, event, chapters)
 
-	title := buildTitle(metadata)
+	title := appendRecordingYear(buildTitle(metadata), event.RecordingDate, time.Now())
 	if err := validateYouTubeTitle(title); err != nil {
 		return model.UploadOutput{}, fmt.Errorf("%w — edit metadata.json (title and/or speaker) at %s and retry via UploadOnlyWorkflow", err, metadataPath)
 	}
@@ -300,6 +300,37 @@ func buildTitle(metadata model.TalkMetadata) string {
 		return metadata.Title
 	}
 	return fmt.Sprintf("%s - %s", metadata.Speaker, metadata.Title)
+}
+
+// appendRecordingYear suffixes the title with " (YYYY)" — the talk's recording
+// year — whenever that year differs from the publish (current) year. On a channel
+// YouTube sorts by publish date, a historically-processed talk (recorded years
+// ago, uploaded now) otherwise masquerades as new; the suffix surfaces the real
+// vintage. No-op when the recording date is unknown/unparseable, the years match,
+// or the suffix is already present (idempotent, so reviewer-added stamps and
+// re-uploads don't double up). Recording and current years are both resolved in
+// Melbourne local time so a year-boundary timestamp can't be misclassified.
+func appendRecordingYear(title, recordingDate string, now time.Time) string {
+	if recordingDate == "" {
+		return title
+	}
+	t, err := time.Parse(time.RFC3339, recordingDate)
+	if err != nil {
+		return title
+	}
+	loc, err := time.LoadLocation(melbourneTZ)
+	if err != nil {
+		loc = time.UTC
+	}
+	recYear := t.In(loc).Year()
+	if recYear == now.In(loc).Year() {
+		return title
+	}
+	suffix := fmt.Sprintf(" (%d)", recYear)
+	if strings.HasSuffix(strings.TrimSpace(title), suffix) {
+		return title
+	}
+	return title + suffix
 }
 
 // validateYouTubeTitle enforces YouTube's 100-character cap on video titles
