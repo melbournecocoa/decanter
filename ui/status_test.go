@@ -1,6 +1,12 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	historypb "go.temporal.io/api/history/v1"
+
+	"github.com/melbournecocoa/decanter/model"
+)
 
 func TestChildStep(t *testing.T) {
 	cases := map[string]struct {
@@ -47,5 +53,39 @@ func TestFormatters(t *testing.T) {
 	}
 	if got := fmtClock(-5); got != "0:00" {
 		t.Fatalf("fmtClock(-5) = %q, want 0:00", got)
+	}
+}
+
+func TestDerivePhase(t *testing.T) {
+	if got := derivePhase(GateReview, nil, false); got != "review_gate" {
+		t.Fatalf("review -> %q", got)
+	}
+	asm := []ActivityProgress{{Name: "Assemble", ActivityID: "5"}}
+	if got := derivePhase(GateRunning, asm, false); got != "assembling" {
+		t.Fatalf("assemble pending -> %q, want assembling", got)
+	}
+	if got := derivePhase(GateRunning, nil, true); got != "processing" {
+		t.Fatalf("open children -> %q, want processing", got)
+	}
+	if got := derivePhase(GateRunning, nil, false); got != "running" {
+		t.Fatalf("bare running -> %q, want running", got)
+	}
+}
+
+func TestAssembleUploadIndex(t *testing.T) {
+	events := []*historypb.HistoryEvent{
+		schedActivityFull(5, "Assemble", "act-5", model.AssembleInput{Segment: model.Segment{Index: 3}}),
+		schedActivityFull(6, "Upload", "act-6", model.UploadInput{Video: model.AssembledVideo{SegmentIndex: 7}}),
+		schedActivity(7, "DetectBumpers"), // ignored
+	}
+	m := assembleUploadIndex(events)
+	if m["act-5"] != 3 {
+		t.Fatalf("assemble act-5 -> %d, want 3", m["act-5"])
+	}
+	if m["act-6"] != 7 {
+		t.Fatalf("upload act-6 -> %d, want 7", m["act-6"])
+	}
+	if _, ok := m["7"]; ok {
+		t.Fatalf("DetectBumpers should not be mapped")
 	}
 }

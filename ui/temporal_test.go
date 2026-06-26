@@ -59,6 +59,21 @@ func childCompleted(id int64) *historypb.HistoryEvent {
 	return &historypb.HistoryEvent{EventId: id, EventType: enumspb.EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED}
 }
 
+func schedActivityFull(id int64, name, activityID string, input any) *historypb.HistoryEvent {
+	p, _ := converter.GetDefaultDataConverter().ToPayloads(input)
+	return &historypb.HistoryEvent{
+		EventId:   id,
+		EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		Attributes: &historypb.HistoryEvent_ActivityTaskScheduledEventAttributes{
+			ActivityTaskScheduledEventAttributes: &historypb.ActivityTaskScheduledEventAttributes{
+				ActivityType: &commonpb.ActivityType{Name: name},
+				ActivityId:   activityID,
+				Input:        p,
+			},
+		},
+	}
+}
+
 func TestSummarizeHistory(t *testing.T) {
 	events := []*historypb.HistoryEvent{
 		schedActivity(5, "DetectBumpers"),
