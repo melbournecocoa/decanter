@@ -8,19 +8,24 @@ type Step struct {
 	Total   int `json:"total"`
 }
 
-var childStepNum = map[string]int{
-	"Classify": 1, "Transcribe": 2, "CleanTranscript": 3, "GatherMetadata": 4,
+var childSteps = map[string]struct {
+	n     int
+	label string
+}{
+	"Classify":        {1, "classify"},
+	"Transcribe":      {2, "transcribe"},
+	"CleanTranscript": {3, "clean"},
+	"GatherMetadata":  {4, "metadata"},
 }
-var childStepLabel = map[int]string{1: "classify", 2: "transcribe", 3: "clean", 4: "metadata"}
 
 // childStep maps a child sub-workflow activity name to its step + short label.
 // Returns (nil, "") for anything that is not one of the four child activities.
 func childStep(activityName string) (*Step, string) {
-	n, ok := childStepNum[activityName]
+	e, ok := childSteps[activityName]
 	if !ok {
 		return nil, ""
 	}
-	return &Step{Current: n, Total: 4}, childStepLabel[n]
+	return &Step{Current: e.n, Total: 4}, e.label
 }
 
 // percentOf returns a clamped 0–100 integer percentage, or nil when the

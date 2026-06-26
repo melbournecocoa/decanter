@@ -33,6 +33,9 @@ func TestPercentOf(t *testing.T) {
 	if p := percentOf(50, 0); p != nil {
 		t.Fatalf("zero den -> %v, want nil", p)
 	}
+	if p := percentOf(-10, 100); p == nil || *p != 0 {
+		t.Fatalf("percentOf(-10,100) = %v, want 0", p)
+	}
 }
 
 func TestFormatters(t *testing.T) {
@@ -41,5 +44,8 @@ func TestFormatters(t *testing.T) {
 	}
 	if got := fmtMB(4_100_000); got != "4.1 MB" {
 		t.Fatalf("fmtMB = %q, want 4.1 MB", got)
+	}
+	if got := fmtClock(-5); got != "0:00" {
+		t.Fatalf("fmtClock(-5) = %q, want 0:00", got)
 	}
 }
