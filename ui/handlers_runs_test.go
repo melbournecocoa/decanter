@@ -19,6 +19,7 @@ type fakeReader struct {
 	runs   []TemporalRun
 	events []*historypb.HistoryEvent
 	status string
+	descs  map[string]*WorkflowDescription // keyed by workflow ID
 }
 
 func (f *fakeReader) ListPipelineRuns(context.Context) ([]TemporalRun, error) { return f.runs, nil }
@@ -26,6 +27,12 @@ func (f *fakeReader) History(context.Context, string, string) ([]*historypb.Hist
 	return f.events, nil
 }
 func (f *fakeReader) Status(context.Context, string) (string, error) { return f.status, nil }
+func (f *fakeReader) Describe(_ context.Context, wf string) (*WorkflowDescription, error) {
+	if d, ok := f.descs[wf]; ok {
+		return d, nil
+	}
+	return &WorkflowDescription{Status: f.status}, nil
+}
 
 func TestRunDetailHandler(t *testing.T) {
 	base := t.TempDir()

@@ -6,6 +6,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
+	"go.temporal.io/sdk/converter"
 )
 
 func schedActivity(id int64, name string) *historypb.HistoryEvent {
@@ -78,5 +79,20 @@ func TestSummarizeHistory(t *testing.T) {
 	}
 	if sum.ChildrenInitiated != 1 {
 		t.Fatalf("children initiated = %d, want 1", sum.ChildrenInitiated)
+	}
+}
+
+func TestDecodeHeartbeat(t *testing.T) {
+	dc := converter.GetDefaultDataConverter()
+	intP, _ := dc.ToPayloads(int64(72))
+	if got := decodeHeartbeat(intP); got != int64(72) {
+		t.Fatalf("int heartbeat = %#v, want int64(72)", got)
+	}
+	strP, _ := dc.ToPayloads("video uploaded")
+	if got := decodeHeartbeat(strP); got != "video uploaded" {
+		t.Fatalf("string heartbeat = %#v, want \"video uploaded\"", got)
+	}
+	if got := decodeHeartbeat(nil); got != nil {
+		t.Fatalf("nil heartbeat = %#v, want nil", got)
 	}
 }

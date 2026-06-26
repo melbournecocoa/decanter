@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -21,11 +22,50 @@ type TemporalRun struct {
 	StartTime  string `json:"startTime"`
 }
 
+// ActivityProgress is a pending activity with its decoded heartbeat payload.
+type ActivityProgress struct {
+	Name       string // activity type name
+	ActivityID string // matches the ActivityTaskScheduled event's ActivityId
+	Heartbeat  any    // int64 | string | nil (see decodeHeartbeat)
+}
+
+// PendingChild is an open child workflow.
+type PendingChild struct {
+	WorkflowID string
+}
+
+// WorkflowDescription is the distilled DescribeWorkflowExecution view.
+type WorkflowDescription struct {
+	Status   string
+	Pending  []ActivityProgress
+	Children []PendingChild
+}
+
 // TemporalReader is the read-only Temporal surface the console needs.
 type TemporalReader interface {
 	ListPipelineRuns(ctx context.Context) ([]TemporalRun, error)
 	History(ctx context.Context, workflowID, runID string) ([]*historypb.HistoryEvent, error)
 	Status(ctx context.Context, workflowID string) (string, error)
+	Describe(ctx context.Context, workflowID string) (*WorkflowDescription, error)
+}
+
+// decodeHeartbeat best-effort decodes a heartbeat payload: int64 first
+// (Assemble out-seconds, Upload byte counts), then string (stage labels),
+// else nil. Never panics on unexpected shapes.
+func decodeHeartbeat(p *commonpb.Payloads) any {
+	if p == nil || len(p.GetPayloads()) == 0 {
+		return nil
+	}
+	dc := converter.GetDefaultDataConverter()
+	var i int64
+	if err := dc.FromPayloads(p, &i); err == nil {
+		return i
+	}
+	var s string
+	if err := dc.FromPayloads(p, &s); err == nil {
+		return s
+	}
+	return nil
 }
 
 type sdkReader struct{ c client.Client }
@@ -77,6 +117,27 @@ func (r *sdkReader) Status(ctx context.Context, workflowID string) (string, erro
 		return "", fmt.Errorf("describe: %w", err)
 	}
 	return statusString(resp.GetWorkflowExecutionInfo().GetStatus()), nil
+}
+
+func (r *sdkReader) Describe(ctx context.Context, workflowID string) (*WorkflowDescription, error) {
+	resp, err := r.c.DescribeWorkflowExecution(ctx, workflowID, "")
+	if err != nil {
+		return nil, fmt.Errorf("describe: %w", err)
+	}
+	out := &WorkflowDescription{
+		Status: statusString(resp.GetWorkflowExecutionInfo().GetStatus()),
+	}
+	for _, p := range resp.GetPendingActivities() {
+		out.Pending = append(out.Pending, ActivityProgress{
+			Name:       p.GetActivityType().GetName(),
+			ActivityID: p.GetActivityId(),
+			Heartbeat:  decodeHeartbeat(p.GetHeartbeatDetails()),
+		})
+	}
+	for _, c := range resp.GetPendingChildren() {
+		out.Children = append(out.Children, PendingChild{WorkflowID: c.GetWorkflowId()})
+	}
+	return out, nil
 }
 
 func statusString(s enumspb.WorkflowExecutionStatus) string {
