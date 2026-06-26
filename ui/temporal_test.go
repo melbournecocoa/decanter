@@ -95,4 +95,8 @@ func TestDecodeHeartbeat(t *testing.T) {
 	if got := decodeHeartbeat(nil); got != nil {
 		t.Fatalf("nil heartbeat = %#v, want nil", got)
 	}
+	emptyP := &commonpb.Payloads{}
+	if got := decodeHeartbeat(emptyP); got != nil {
+		t.Fatalf("empty payloads heartbeat = %#v, want nil", got)
+	}
 }
