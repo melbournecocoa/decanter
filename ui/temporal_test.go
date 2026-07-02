@@ -74,6 +74,10 @@ func schedActivityFull(id int64, name, activityID string, input any) *historypb.
 	}
 }
 
+func converterToPayloads(v any) (*commonpb.Payloads, error) {
+	return converter.GetDefaultDataConverter().ToPayloads(v)
+}
+
 func TestSummarizeHistory(t *testing.T) {
 	events := []*historypb.HistoryEvent{
 		schedActivity(5, "DetectBumpers"),

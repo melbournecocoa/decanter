@@ -99,6 +99,38 @@ func derivePhase(state GateState, pendingParent []ActivityProgress, hasChildren 
 	return "running"
 }
 
+// SegmentStatus is one segment row's live status.
+type SegmentStatus struct {
+	Index   int    `json:"index"`
+	Phase   string `json:"phase"`             // queued|classify|transcribe|clean|metadata|done|skipped|assembling|uploading|uploaded
+	Step    *Step  `json:"step,omitempty"`    // child-phase dots
+	Percent *int   `json:"percent,omitempty"` // assembling/uploading only
+	Detail  string `json:"detail,omitempty"`  // e.g. "1:12 / 2:04"
+	HasFinal bool  `json:"hasFinal"`
+}
+
+// RunStatus is the /status payload.
+type RunStatus struct {
+	State    GateState       `json:"state"`
+	Phase    string          `json:"phase"`
+	Segments []SegmentStatus `json:"segments"`
+}
+
+// assembleDenominator returns the content duration (seconds) used as the
+// Assemble % denominator: the reviewer trim window when set, else the Split
+// segment's End-Start. Returns 0 when unknown (→ percentOf yields nil).
+func assembleDenominator(m model.TalkMetadata, seg model.Segment) float64 {
+	if m.Trim != nil && m.Trim.EndSeconds > m.Trim.StartSeconds {
+		return m.Trim.EndSeconds - m.Trim.StartSeconds
+	}
+	return seg.End - seg.Start
+}
+
+// childWorkflowID mirrors workflow/pipeline.go's child naming.
+func childWorkflowID(wf string, idx int) string {
+	return fmt.Sprintf("%s-segment-%d", wf, idx)
+}
+
 // assembleUploadIndex decodes scheduled Assemble/Upload inputs from history to
 // map each activity's ActivityId to its segment index, so an in-flight parent
 // activity (which carries no input) can be attributed to a segment row.

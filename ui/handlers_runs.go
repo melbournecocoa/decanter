@@ -19,6 +19,7 @@ func decodeJSON(r *http.Request, v any) error { return json.NewDecoder(r.Body).D
 func (s *Server) registerRunRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
 	mux.HandleFunc("GET /api/runs/{wf}", s.handleRunDetail)
+	s.registerStatusRoutes(mux)
 }
 
 // RunListItem merges Temporal status with the workspace's event name.
