@@ -65,6 +65,72 @@ func TestStatusHandler_Assembling(t *testing.T) {
 	}
 }
 
+func TestStatusHandler_Processing(t *testing.T) {
+	base := t.TempDir()
+	wf := "decanter-yt-proc"
+	// 3 segment files so index 1 classifies as a talk (0=welcome, 2=wrapup).
+	for _, i := range []int{0, 1, 2} {
+		p := SegmentVideoPath(base, wf, i)
+		_ = os.MkdirAll(filepathDir(p), 0o755)
+		_ = os.WriteFile(p, []byte("x"), 0o644)
+	}
+
+	// History: one child initiated but not yet closed → classifyState returns GateRunning.
+	events := []*historypb.HistoryEvent{
+		childInitiated(1),
+	}
+
+	// Parent: Running, no pending parent activities, one child → derivePhase returns "processing".
+	parentDesc := &WorkflowDescription{
+		Status:   "Running",
+		Pending:  []ActivityProgress{},
+		Children: []PendingChild{{WorkflowID: wf + "-segment-1"}},
+	}
+	// Child: Running, pending Transcribe activity.
+	childDesc := &WorkflowDescription{
+		Status:  "Running",
+		Pending: []ActivityProgress{{Name: "Transcribe"}},
+	}
+
+	s := &Server{Base: base, Temporal: &fakeReader{
+		status: "Running",
+		events: events,
+		descs: map[string]*WorkflowDescription{
+			wf:                   parentDesc,
+			wf + "-segment-1":    childDesc,
+		},
+	}}
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs/"+wf+"/status", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var rs RunStatus
+	_ = json.Unmarshal(rec.Body.Bytes(), &rs)
+	if rs.Phase != "processing" {
+		t.Fatalf("phase = %q, want processing", rs.Phase)
+	}
+	var seg1 *SegmentStatus
+	for i := range rs.Segments {
+		if rs.Segments[i].Index == 1 {
+			seg1 = &rs.Segments[i]
+		}
+	}
+	if seg1 == nil {
+		t.Fatalf("segment with index 1 not found in response")
+	}
+	if seg1.Phase != "transcribe" {
+		t.Fatalf("seg1.Phase = %q, want transcribe", seg1.Phase)
+	}
+	if seg1.Step == nil {
+		t.Fatalf("seg1.Step is nil, want Step{Current:2, Total:4}")
+	}
+	if seg1.Step.Current != 2 || seg1.Step.Total != 4 {
+		t.Fatalf("seg1.Step = %+v, want {Current:2, Total:4}", seg1.Step)
+	}
+}
+
 func TestStatusHandler_TemporalError_Returns200Unknown(t *testing.T) {
 	s := &Server{Base: t.TempDir(), Temporal: &erroringReader{}}
 	rec := httptest.NewRecorder()

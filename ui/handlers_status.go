@@ -24,6 +24,8 @@ func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, rs) // never 5xx the poller
 		return
 	}
+	// History errors are tolerated: the poller must never 5xx. With nil events,
+	// state/phase fall back to safe defaults and segments read as queued.
 	events, _ := s.Temporal.History(r.Context(), wf, "")
 	rs.State = classifyState(summarizeHistory(events), desc.Status)
 	rs.Phase = derivePhase(rs.State, desc.Pending, len(desc.Children) > 0)
