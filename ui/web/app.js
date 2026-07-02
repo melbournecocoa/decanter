@@ -79,7 +79,7 @@ function renderGateBanner(wf, d) {
   const { talks, skipped } = gateSummary(d.segments);
   if (gate !== 'review_gate' && gate !== 'upload_gate') {
     el.className = 'banner';
-    el.innerHTML = `<span class="banner-phase">${esc((gate || 'running').replace('_', ' '))}</span>`;
+    el.innerHTML = `<span class="banner-phase">${esc((gate || 'running').replace(/_/g, ' '))}</span>`;
     return;
   }
   const isReview = gate === 'review_gate';

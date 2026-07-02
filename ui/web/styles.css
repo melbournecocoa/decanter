@@ -44,5 +44,6 @@ a { color:var(--accent); text-decoration:none; }
 .seg-status { margin-top: 6px; min-height: 0; }
 .banner { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 10px 0 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .banner-gate { border-color: #2c8a57; }
+.banner .row-actions { margin-top: 0; }
 .banner-phase { color: var(--muted); text-transform: capitalize; }
 @media (max-width: 900px) { .run-grid { grid-template-columns: 1fr; } }
