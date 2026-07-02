@@ -77,6 +77,7 @@ async function renderGateBannerFromState(wf, rs) {
   }
   try {
     const d = await api('/api/runs/' + encodeURIComponent(wf));
+    if (_pollWf !== wf) return; // navigated away while fetching
     renderGateBanner(wf, d);
   } catch { /* leave as-is */ }
 }
@@ -111,6 +112,7 @@ function renderSegStatus(wf, s) {
     const row = document.getElementById(`seg-row-${s.index}`);
     if (row && !row.querySelector('.up-link') && s.phase !== 'skipped') {
       const main = row.querySelector('.seg-main');
+      if (!main) return;
       const a = document.createElement('a');
       a.className = 'btn btn-sm up-link';
       a.href = `#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload`;
