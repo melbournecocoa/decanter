@@ -73,7 +73,13 @@ type sdkReader struct{ c client.Client }
 // NewSDKReader constructs a TemporalReader backed by a live Temporal SDK client.
 func NewSDKReader(c client.Client) TemporalReader { return &sdkReader{c: c} }
 
-const pipelineQuery = `WorkflowType="PipelineWorkflow" AND TaskQueue="decanter-pipeline" ORDER BY StartTime DESC`
+// pipelineQuery lists the parent pipeline runs. NO `ORDER BY`: miyuki's Temporal
+// runs basic (non-Elasticsearch) visibility, which rejects order-by with
+// "operation is not supported: 'order by' clause" — erroring the whole list call
+// and (because handleRuns swallows that error) dropping every run to
+// GateUnknown. Display order comes from the disk listing, so ordering here is
+// unnecessary anyway. Guarded by TestPipelineQueryHasNoOrderBy.
+const pipelineQuery = `WorkflowType="PipelineWorkflow" AND TaskQueue="decanter-pipeline"`
 
 func (r *sdkReader) ListPipelineRuns(ctx context.Context) ([]TemporalRun, error) {
 	resp, err := r.c.ListWorkflow(ctx, &workflowservice.ListWorkflowExecutionsRequest{

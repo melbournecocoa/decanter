@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	commonpb "go.temporal.io/api/common/v1"
@@ -8,6 +9,15 @@ import (
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/sdk/converter"
 )
+
+// TestPipelineQueryHasNoOrderBy guards against reintroducing an ORDER BY clause:
+// miyuki's basic (non-ES) visibility rejects it, which errors ListPipelineRuns
+// and silently drops every run's state to "unknown" in the console.
+func TestPipelineQueryHasNoOrderBy(t *testing.T) {
+	if strings.Contains(strings.ToUpper(pipelineQuery), "ORDER BY") {
+		t.Fatalf("pipelineQuery must not use ORDER BY (basic visibility rejects it): %q", pipelineQuery)
+	}
+}
 
 func schedActivity(id int64, name string) *historypb.HistoryEvent {
 	return &historypb.HistoryEvent{

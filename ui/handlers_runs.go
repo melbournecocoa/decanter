@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 
@@ -45,18 +46,22 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.Temporal != nil {
-		if runs, err := s.Temporal.ListPipelineRuns(r.Context()); err == nil {
-			for _, run := range runs {
-				item, ok := seen[run.WorkflowID]
-				if !ok {
-					item = &RunListItem{WorkflowID: run.WorkflowID}
-					seen[run.WorkflowID] = item
-					order = append(order, run.WorkflowID)
-				}
-				item.Status = run.Status
-				item.StartTime = run.StartTime
-				item.State = s.deriveState(r, run.WorkflowID, run.RunID, run.Status)
+		runs, err := s.Temporal.ListPipelineRuns(r.Context())
+		if err != nil {
+			// Don't fail the request — disk runs still render — but log it:
+			// a swallowed error here is exactly why every run showed "unknown".
+			log.Printf("handleRuns: list pipeline runs failed (states fall back to unknown): %v", err)
+		}
+		for _, run := range runs {
+			item, ok := seen[run.WorkflowID]
+			if !ok {
+				item = &RunListItem{WorkflowID: run.WorkflowID}
+				seen[run.WorkflowID] = item
+				order = append(order, run.WorkflowID)
 			}
+			item.Status = run.Status
+			item.StartTime = run.StartTime
+			item.State = s.deriveState(r, run.WorkflowID, run.RunID, run.Status)
 		}
 	}
 	out := make([]*RunListItem, 0, len(order))
