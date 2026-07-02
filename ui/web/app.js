@@ -11,6 +11,34 @@ const toast = (msg) => {
 };
 const esc = (s) => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+// runDate parses the yyyymmdd-hhmmss stamp out of a workflow id into "D Mon YYYY".
+function runDate(wf) {
+  const m = /(\d{4})(\d{2})(\d{2})-\d{6}/.exec(wf || '');
+  if (!m) return '';
+  const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${+m[3]} ${mo[+m[2] - 1]} ${m[1]}`;
+}
+
+// stateChip maps a run state to a status chip {cls, label}.
+function stateChip(state) {
+  const s = (state || '').replace(/_gate$/, '');
+  if (state === 'review_gate') return { cls: 'chip--gate', label: 'ready for review' };
+  if (state === 'upload_gate') return { cls: 'chip--gate', label: 'ready for upload' };
+  if (s === 'running')   return { cls: 'chip--running', label: 'running' };
+  if (s === 'completed') return { cls: 'chip--completed', label: 'completed' };
+  if (s === 'failed' || s === 'terminated') return { cls: 'chip--failed', label: s };
+  return { cls: 'chip--unknown', label: s || 'unknown' };
+}
+
+// emptyState renders a glassware line-art placeholder with a literal message.
+function emptyState(msg) {
+  return `<div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 3h6M10 3v4.2L5.4 15.1A3 3 0 0 0 8 20h8a3 3 0 0 0 2.6-4.9L14 7.2V3"/><path d="M7.2 14h9.6"/>
+    </svg>
+    <p>${esc(msg)}</p></div>`;
+}
+
 // mdInline applies inline markdown (code, bold, italic, links) to an
 // already-HTML-escaped string. Code spans are stashed first so their contents
 // aren't touched by the bold/italic passes.
@@ -163,19 +191,44 @@ function renderSegStatus(wf, s) {
 
 async function routeRuns() {
   const runs = await api('/api/runs');
-  app.innerHTML = `<h2>Runs</h2><div class="runs">${runs.map(r => `
-    <a class="run-row" href="#/run/${encodeURIComponent(r.workflowId)}">
-      <span class="badge b-${r.state.replace('_gate','')}">${esc(r.state.replace(/_/g,' '))}</span>
-      <strong>${esc(r.eventName || r.workflowId)}</strong>
-      <span class="run-row-step" data-wf="${esc(r.workflowId)}" style="color:var(--muted)"></span>
-    </a>`).join('')}</div>`;
-  // lightweight: only running rows get a live current-step line
-  runs.filter(r => r.status === 'Running').forEach(async r => {
+  if (!runs.length) {
+    app.innerHTML = `<h2>Runs</h2>${emptyState('No runs in the workspace yet.')}`;
+    return;
+  }
+  app.innerHTML = `<h2>Runs</h2><div class="ledger">${runs.map(r => {
+    const ch = stateChip(r.state);
+    return `<a class="ledger-row${r.state === 'completed' ? ' is-done' : ''}" href="#/run/${encodeURIComponent(r.workflowId)}">
+      <span class="ledger-edge"></span>
+      <span class="ledger-body">
+        <span class="ledger-no">${esc(r.workflowId)}</span>
+        <span class="ledger-title">${esc(r.eventName || r.workflowId)}</span>
+        <span class="ledger-meta" data-wf="${esc(r.workflowId)}"><span>${runDate(r.workflowId)}</span></span>
+      </span>
+      <span class="ledger-aside">
+        <span class="chip ${ch.cls}">${esc(ch.label)}</span>
+        <span class="ledger-step" data-wf="${esc(r.workflowId)}"></span>
+      </span>
+    </a>`;
+  }).join('')}</div>`;
+
+  // progressive enrichment: fill talk/skip counts, and a live step for running rows
+  runs.forEach(async r => {
     try {
-      const rs = await api(`/api/runs/${encodeURIComponent(r.workflowId)}/status`);
-      const el = document.querySelector(`.run-row-step[data-wf="${CSS.escape(r.workflowId)}"]`);
-      if (el) el.textContent = phaseLine(rs);
-    } catch { /* ignore */ }
+      const d = await api('/api/runs/' + encodeURIComponent(r.workflowId));
+      const talks = d.segments.filter(s => s.type === 'talk' && !s.skip).length;
+      const skipped = d.segments.filter(s => s.skip).length;
+      const meta = document.querySelector(`.ledger-meta[data-wf="${CSS.escape(r.workflowId)}"]`);
+      if (meta) meta.innerHTML = `<span>${runDate(r.workflowId)}</span>`
+        + `<span class="sep">·</span><span><b>${talks}</b> talk${talks === 1 ? '' : 's'}</span>`
+        + (skipped ? `<span class="sep">·</span><span><b>${skipped}</b> skipped</span>` : '');
+    } catch { /* leave the date-only meta */ }
+    if (r.status === 'Running') {
+      try {
+        const rs = await api(`/api/runs/${encodeURIComponent(r.workflowId)}/status`);
+        const el = document.querySelector(`.ledger-step[data-wf="${CSS.escape(r.workflowId)}"]`);
+        if (el) el.textContent = phaseLine(rs);
+      } catch { /* ignore */ }
+    }
   });
 }
 function phaseLine(rs) {
@@ -324,13 +377,13 @@ async function routeSegment(wf, idx) {
   const titleLen = [...(m.title || '')].length;
 
   app.innerHTML = `
-  <p><a href="#/run/${encodeURIComponent(wf)}">← ${esc(detail.event.eventName || wf)}</a> · segment ${String(idx).padStart(2,'0')}</p>
+  <p class="crumb"><a href="#/run/${encodeURIComponent(wf)}">← ${esc(detail.event.eventName || wf)}</a> · segment ${String(idx).padStart(2,'0')}</p>
   <div class="review">
     <div class="player-col">
       <video id="vid" controls preload="metadata" src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/video"></video>
       <div id="timeline"></div>
-      <div id="trimreadout" style="color:var(--muted);font-size:12px;margin-top:6px"></div>
-      <button class="btn" id="markbumper" style="margin-top:8px">⚑ Mark bumper boundary at playhead</button>
+      <div id="trimreadout" class="readout"></div>
+      <button class="btn" id="markbumper" style="margin-top:10px">⚑ Mark bumper boundary at playhead</button>
     </div>
     <div class="panel">
       <div class="field"><label>Title <span id="tc" class="counter ${titleLen>100?'over':''}">${titleLen}/100</span></label>
@@ -338,9 +391,9 @@ async function routeSegment(wf, idx) {
       <div class="field"><label>Speaker</label><input id="f-speaker" value="${esc(m.speaker)}"></div>
       <div class="field"><label>Description</label><textarea id="f-desc">${esc(m.description)}</textarea></div>
       <div class="field"><label>Tags (comma separated)</label><input id="f-tags" value="${esc((m.tags||[]).join(', '))}"></div>
-      <div class="field"><label><input type="checkbox" id="f-skip" ${m.skip?'checked':''}> Skip this segment</label></div>
+      <div class="skip-row"><input type="checkbox" id="f-skip" ${m.skip?'checked':''}><label for="f-skip">Skip this segment</label></div>
       <div class="row-actions">
-        <button class="btn" id="save">Save</button>
+        <button class="btn btn-save" id="save">Save</button>
       </div>
     </div>
   </div>
@@ -388,7 +441,7 @@ async function routeUpload(wf, idx) {
   const detail = await api('/api/runs/' + encodeURIComponent(wf));
   const m = metadata || {};
   app.innerHTML = `
-  <p><a href="#/run/${encodeURIComponent(wf)}">← ${esc(detail.event.eventName || wf)}</a> · upload preview · segment ${String(idx).padStart(2,'0')}</p>
+  <p class="crumb"><a href="#/run/${encodeURIComponent(wf)}">← ${esc(detail.event.eventName || wf)}</a> · upload preview · segment ${String(idx).padStart(2,'0')}</p>
   <div class="review">
     <div class="player-col">
       <video id="vid" controls preload="metadata" crossorigin="anonymous">
@@ -403,10 +456,10 @@ async function routeUpload(wf, idx) {
     </div>
     <div class="panel">
       <h3 style="margin-top:0">${esc(m.title || '')}</h3>
-      <p style="color:var(--muted)">${esc(m.speaker || '')}</p>
-      <p style="white-space:pre-wrap">${esc(m.description || '')}</p>
+      <p class="up-speaker">${esc(m.speaker || '')}</p>
+      <p class="up-desc">${esc(m.description || '')}</p>
       <div class="chips">${(m.tags||[]).map(t => `<span>${esc(t)}</span>`).join('')}</div>
-      ${(m.chapters||[]).length ? `<h4>Chapters</h4>${m.chapters.map(c => `<div>${esc(c.title)} — ${Math.floor(c.time/60)}:${String(Math.floor(c.time%60)).padStart(2,'0')}</div>`).join('')}` : ''}
+      ${(m.chapters||[]).length ? `<div class="up-chapters"><h4>Chapters</h4>${m.chapters.map(c => `<div class="row"><b>${esc(c.title)}</b> — ${Math.floor(c.time/60)}:${String(Math.floor(c.time%60)).padStart(2,'0')}</div>`).join('')}</div>` : ''}
     </div>
   </div>`;
 

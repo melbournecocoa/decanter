@@ -10,14 +10,20 @@ function initTimeline(opts) {
   let trim = opts.trim ? { ...opts.trim } : null;
   window.currentTrim = trim;
 
-  mount.innerHTML = `<div class="tl" style="position:relative;height:34px;background:#161b22;border:1px solid #2b3340;border-radius:6px;margin-top:8px;cursor:pointer">
-    <div class="tl-kept" style="position:absolute;top:0;bottom:0;background:linear-gradient(90deg,#1d3a52,#21425e);border-left:2px solid #4c8eda;border-right:2px solid #4c8eda"></div>
-    <div class="tl-h tl-in"  data-h="in"  style="position:absolute;top:-3px;width:10px;height:40px;background:#4c8eda;border-radius:3px;cursor:ew-resize"></div>
-    <div class="tl-h tl-out" data-h="out" style="position:absolute;top:-3px;width:10px;height:40px;background:#4c8eda;border-radius:3px;cursor:ew-resize"></div>
-    <div class="tl-play" style="position:absolute;top:-2px;bottom:-2px;width:2px;background:#fff"></div>
+  // Distiller's cut: dimmed/hatched discard zones flank a glowing amber kept
+  // region. Styling lives in styles.css (.tl-*); JS only positions the pieces.
+  mount.innerHTML = `<div class="tl">
+    <div class="tl-cut tl-heads"></div>
+    <div class="tl-cut tl-tails"></div>
+    <div class="tl-kept"></div>
+    <div class="tl-h tl-in"  data-h="in"></div>
+    <div class="tl-h tl-out" data-h="out"></div>
+    <div class="tl-play"></div>
   </div>`;
   const bar = mount.querySelector('.tl');
   const kept = mount.querySelector('.tl-kept');
+  const heads = mount.querySelector('.tl-heads');
+  const tails = mount.querySelector('.tl-tails');
   const inH = mount.querySelector('.tl-in');
   const outH = mount.querySelector('.tl-out');
   const play = mount.querySelector('.tl-play');
@@ -35,16 +41,19 @@ function initTimeline(opts) {
     (chapters || []).forEach(c => {
       const el = document.createElement('div');
       el.className = 'tl-chap'; el.title = c.title;
-      el.style = `position:absolute;top:0;bottom:0;width:2px;background:#e0b07e;left:${pct(c.time)}%`;
+      el.style.left = pct(c.time) + '%';
       bar.appendChild(el);
     });
   }
   function draw() {
     ensureTrim();
-    inH.style.left = `calc(${pct(trim.startSeconds)}% - 5px)`;
-    outH.style.left = `calc(${pct(trim.endSeconds)}% - 5px)`;
-    kept.style.left = pct(trim.startSeconds) + '%';
-    kept.style.right = (100 - pct(trim.endSeconds)) + '%';
+    const inPct = pct(trim.startSeconds), outPct = pct(trim.endSeconds);
+    inH.style.left = `calc(${inPct}% - 4px)`;
+    outH.style.left = `calc(${outPct}% - 4px)`;
+    kept.style.left = inPct + '%';
+    kept.style.right = (100 - outPct) + '%';
+    heads.style.left = '0'; heads.style.width = inPct + '%';
+    tails.style.left = outPct + '%'; tails.style.right = '0';
     readout.textContent = `trim ${fmt(trim.startSeconds)} (${trim.startSeconds.toFixed(2)}s) → ${fmt(trim.endSeconds)} (${trim.endSeconds.toFixed(2)}s)  ·  press i / o to set in/out at playhead`;
   }
 
