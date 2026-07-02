@@ -11,6 +11,8 @@ const toast = (msg) => {
 };
 const esc = (s) => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+function startStatusPoll(_wf) { /* replaced in Task 7 */ }
+
 async function routeRuns() {
   const runs = await api('/api/runs');
   app.innerHTML = `<h2>Runs</h2><div class="runs">${runs.map(r => `
@@ -23,23 +25,100 @@ async function routeRuns() {
 
 async function routeRun(wf) {
   const d = await api('/api/runs/' + encodeURIComponent(wf));
-  const strip = d.segments.map(s => {
-    const up = s.type === 'talk'
-      ? `<a href="#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload" style="display:block;font-size:11px;margin-top:4px">▸ upload preview</a>`
+  const rows = d.segments.map(s => {
+    const idx = String(s.index).padStart(2, '0');
+    const badge = s.skip ? 'skip' : s.type;
+    const isTalk = s.type === 'talk' && !s.skip;
+    const upBtn = (isTalk && s.hasFinal)
+      ? `<a class="btn btn-sm" href="#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload">▸ upload preview</a>`
       : '';
-    return `<div class="seg-chip">
-      <a href="#/run/${encodeURIComponent(wf)}/seg/${s.index}"><strong>${String(s.index).padStart(2,'0')}</strong>
-      <span class="badge b-${s.skip ? 'skip' : s.type}">${s.skip ? 'skip' : s.type}</span>
-      <div>${esc(s.title || '')}</div></a>${up}</div>`;
+    return `<div class="seg-row" id="seg-row-${s.index}">
+      <div class="seg-main">
+        <span class="seg-idx">${idx}</span>
+        <span class="badge b-${badge}">${badge}</span>
+        <a class="seg-title" href="#/run/${encodeURIComponent(wf)}/seg/${s.index}">${esc(s.title || '(untitled)')}</a>
+        ${upBtn}
+      </div>
+      <div class="seg-status" id="seg-status-${s.index}"></div>
+    </div>`;
   }).join('');
-  const gate = d.state;
-  app.innerHTML = `<h2>${esc(d.event.eventName || wf)}</h2>
-    <p style="color:var(--muted)">${esc(wf)} · <span class="badge b-${gate.replace('_gate','')}">${esc(gate.replace('_',' '))}</span></p>
-    <h3>Segments</h3><div class="seg-strip">${strip}</div>
-    <div id="bumpers-panel"></div>
-    <div id="reset-panel"></div>`;
+
+  app.innerHTML = `
+    <h2>${esc(d.event.eventName || wf)}</h2>
+    <p class="run-sub">${esc(wf)}</p>
+    <div id="run-banner" class="banner"></div>
+    <div class="run-grid">
+      <section class="run-main">
+        <h3>Segments</h3>
+        <div class="seg-rows">${rows}</div>
+      </section>
+      <aside class="run-aside">
+        <div id="bumpers-panel"></div>
+        <div id="reset-panel"></div>
+      </aside>
+    </div>`;
+
+  renderGateBanner(wf, d);
   renderBumpersPanel(wf, d);
   renderResetPanel(wf, d);
+  startStatusPoll(wf); // defined in Task 7; harmless no-op stub until then
+}
+
+// gateSummary returns "{N} talks → Assemble, {M} skipped" style counts.
+function gateSummary(segments) {
+  const talks = segments.filter(s => s.type === 'talk' && !s.skip).length;
+  const skipped = segments.filter(s => s.skip).length;
+  return { talks, skipped };
+}
+
+// renderGateBanner shows the dual-purpose banner. At a gate it hosts the
+// workflow-level Approve/Reject; otherwise Task 7's poll fills it with status.
+function renderGateBanner(wf, d) {
+  const el = document.getElementById('run-banner');
+  const gate = d.state;
+  const { talks, skipped } = gateSummary(d.segments);
+  if (gate !== 'review_gate' && gate !== 'upload_gate') {
+    el.className = 'banner';
+    el.innerHTML = `<span class="banner-phase">${esc((gate || 'running').replace('_', ' '))}</span>`;
+    return;
+  }
+  const isReview = gate === 'review_gate';
+  const verb = isReview ? 'Approve review' : 'Approve upload';
+  const next = isReview ? 'Assemble' : 'Upload';
+  el.className = 'banner banner-gate';
+  el.innerHTML = `
+    <div class="banner-msg"><strong>Ready for ${isReview ? 'review' : 'upload'}</strong>
+      · ${talks} talk${talks === 1 ? '' : 's'} → ${next}${skipped ? `, ${skipped} skipped` : ''}</div>
+    <div class="row-actions">
+      <button class="btn btn-go" id="gate-approve">✓ ${verb}</button>
+      <button class="btn btn-no" id="gate-reject">Reject</button>
+    </div>`;
+
+  const gateKey = isReview ? 'review' : 'upload';
+  document.getElementById('gate-approve').onclick = () => confirmDialog({
+    title: `${verb}?`,
+    bodyHTML: `<p>${talks} talk${talks === 1 ? '' : 's'} will proceed to ${next}${skipped ? `; ${skipped} segment${skipped === 1 ? '' : 's'} skipped` : ''}.</p>`,
+    confirmLabel: `✓ ${verb}`,
+    onConfirm: async () => {
+      await api(`/api/runs/${encodeURIComponent(wf)}/approve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gate: gateKey, approved: true }),
+      });
+      toast(`${verb} sent`); router();
+    },
+  });
+  document.getElementById('gate-reject').onclick = () => confirmDialog({
+    title: `Reject ${gateKey}?`,
+    bodyHTML: '<p>Rejecting <strong>fails the entire workflow run</strong> — it does not re-open the gate. You would need to start a new run.</p>',
+    confirmLabel: 'Reject & fail run',
+    onConfirm: async () => {
+      await api(`/api/runs/${encodeURIComponent(wf)}/approve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gate: gateKey, approved: false }),
+      });
+      toast(`${gateKey} rejected — run failed`); router();
+    },
+  });
 }
 
 function router() {
