@@ -11,6 +11,45 @@ const toast = (msg) => {
 };
 const esc = (s) => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+// mdInline applies inline markdown (code, bold, italic, links) to an
+// already-HTML-escaped string. Code spans are stashed first so their contents
+// aren't touched by the bold/italic passes.
+function mdInline(s) {
+  const codes = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\x00${codes.length - 1}\x00`; });
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+       .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+       .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s.replace(/\x00(\d+)\x00/g, (_, n) => `<code>${codes[+n]}</code>`);
+}
+
+// mdToHtml is a compact markdown renderer for the metadata_reasoning.md sidecar:
+// ATX headings, unordered lists, horizontal rules, paragraphs, and inline marks.
+// Source is HTML-escaped up front so the output is safe to inject.
+function mdToHtml(src) {
+  const lines = esc(src).split(/\r?\n/);
+  const out = [];
+  let listOpen = false;
+  const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
+  const isBlank = (l) => /^\s*$/.test(l);
+  const isSpecial = (l) => /^\s*---+\s*$/.test(l) || /^#{1,6}\s+/.test(l) || /^\s*[-*]\s+/.test(l);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*---+\s*$/.test(line)) { closeList(); out.push('<hr>'); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeList(); out.push(`<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`); continue; }
+    const li = line.match(/^\s*[-*]\s+(.*)$/);
+    if (li) { if (!listOpen) { out.push('<ul>'); listOpen = true; } out.push(`<li>${mdInline(li[1])}</li>`); continue; }
+    if (isBlank(line)) { closeList(); continue; }
+    closeList();
+    const para = [line];
+    while (i + 1 < lines.length && !isBlank(lines[i + 1]) && !isSpecial(lines[i + 1])) para.push(lines[++i]);
+    out.push(`<p>${mdInline(para.join(' '))}</p>`);
+  }
+  closeList();
+  return out.join('\n');
+}
+
 let _pollTimer = null;
 let _pollWf = null;
 const POLL_MS = 2000;
@@ -305,7 +344,7 @@ async function routeSegment(wf, idx) {
       </div>
     </div>
   </div>
-  ${reasoning ? `<section class="reason-section"><h3>Reasoning <span class="reason-file">metadata_reasoning.md</span></h3><div class="reason-body">${esc(reasoning)}</div></section>` : ''}`;
+  ${reasoning ? `<section class="reason-section"><h3>Reasoning <span class="reason-file">metadata_reasoning.md</span></h3><div class="reason-body md">${mdToHtml(reasoning)}</div></section>` : ''}`;
 
   const titleEl = document.getElementById('f-title');
   titleEl.addEventListener('input', () => {
@@ -330,6 +369,17 @@ async function routeSegment(wf, idx) {
 
   document.getElementById('markbumper').onclick = () =>
     markBumperAtPlayhead(wf, idx, document.getElementById('vid')).catch(e => toast(e.message));
+
+  // Park the playhead at the trim start so a single Play verifies the boundary
+  // without scrubbing. Wait for metadata (seekable) if it hasn't loaded yet.
+  const vid = document.getElementById('vid');
+  const startAt = (m.trim && typeof m.trim.startSeconds === 'number') ? m.trim.startSeconds : 0;
+  if (startAt > 0) {
+    const seekToStart = () => { try { vid.currentTime = startAt; } catch {} };
+    if (vid.readyState >= 1) seekToStart();
+    else vid.addEventListener('loadedmetadata', seekToStart, { once: true });
+  }
+
   initTimeline({ wf, idx, video: document.getElementById('vid'), mount: document.getElementById('timeline'),
     readout: document.getElementById('trimreadout'), trim: m.trim, chapters: m.chapters || [], onChange: () => save().catch(()=>{}) });
 }
