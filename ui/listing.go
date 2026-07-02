@@ -18,6 +18,7 @@ type SegmentInfo struct {
 	Skip        bool              `json:"skip"`
 	Title       string            `json:"title,omitempty"`
 	Speaker     string            `json:"speaker,omitempty"`
+	HasFinal    bool              `json:"hasFinal"`
 }
 
 // segmentType mirrors activity/classify.go's purely positional heuristic.
@@ -60,6 +61,7 @@ func ListRunSegments(base, wf string) ([]SegmentInfo, error) {
 			info.Title = m.Title
 			info.Speaker = m.Speaker
 		}
+		info.HasFinal = statExists(FinalVideoPath(base, wf, idx))
 		out = append(out, info)
 	}
 	return out, nil

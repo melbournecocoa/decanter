@@ -49,3 +49,29 @@ func TestListRunSegments(t *testing.T) {
 		t.Fatalf("seg 1 should not have metadata yet")
 	}
 }
+
+func TestListRunSegments_HasFinal(t *testing.T) {
+	base := t.TempDir()
+	wf := "wf1"
+	for _, i := range []int{0, 1} {
+		p := SegmentVideoPath(base, wf, i)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, []byte("x"), 0o644)
+	}
+	// only segment 1 has a final.mp4
+	fp := FinalVideoPath(base, wf, 1)
+	_ = os.MkdirAll(filepath.Dir(fp), 0o755)
+	_ = os.WriteFile(fp, []byte("v"), 0o644)
+
+	segs, err := ListRunSegments(base, wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int]bool{}
+	for _, s := range segs {
+		got[s.Index] = s.HasFinal
+	}
+	if got[0] || !got[1] {
+		t.Fatalf("hasFinal = %v, want {0:false,1:true}", got)
+	}
+}
