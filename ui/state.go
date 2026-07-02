@@ -26,6 +26,14 @@ func (s HistorySummary) scheduled(name string) bool { return s.ScheduledActiviti
 func (s HistorySummary) completed(name string) bool { return s.CompletedActivities[name] > 0 }
 func (s HistorySummary) signalled(name string) bool { return s.Signals[name] > 0 }
 
+// allCompleted reports whether every scheduled instance of an activity has
+// completed. The pipeline fans out per-segment activities (Assemble, Upload)
+// in a single workflow task, so all instances are scheduled at once; this
+// distinguishes "the whole fan-out finished" from "the first one finished".
+func (s HistorySummary) allCompleted(name string) bool {
+	return s.ScheduledActivities[name] > 0 && s.CompletedActivities[name] >= s.ScheduledActivities[name]
+}
+
 // classifyState maps (history summary, describe status) to a GateState.
 // Status strings are the Temporal enum String() values: "Running",
 // "Completed", "Failed", "Terminated", "Canceled", "TimedOut", "ContinuedAsNew".
@@ -38,8 +46,10 @@ func classifyState(sum HistorySummary, status string) GateState {
 	case "Terminated", "Canceled":
 		return GateTerminated
 	case "Running":
-		// upload gate: past review, assemble done, awaiting upload approval.
-		if sum.signalled("review_approval") && sum.completed("Assemble") && !sum.signalled("upload_approval") {
+		// upload gate: past review, EVERY assemble done, awaiting upload
+		// approval. Waiting on all (not the first) keeps the pill on "running"
+		// while sibling segments are still encoding.
+		if sum.signalled("review_approval") && sum.allCompleted("Assemble") && !sum.signalled("upload_approval") {
 			return GateUpload
 		}
 		// review gate: children fanned out AND all closed, assemble not yet

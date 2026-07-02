@@ -89,6 +89,74 @@ func TestRunDetailHandler_EarlyStage(t *testing.T) {
 	}
 }
 
+// A reset (or terminate+restart) leaves the superseded run in visibility under
+// the same WorkflowID, so ListWorkflow returns several rows for one ID in
+// arbitrary order. currentRuns must collapse to the live run — the Running one
+// — so a stale Terminated row can't clobber the pill.
+func TestCurrentRuns(t *testing.T) {
+	runs := []TemporalRun{
+		{WorkflowID: "wf-a", RunID: "old", Status: "Terminated", StartTime: "2026-07-02T10:00:00Z"},
+		{WorkflowID: "wf-a", RunID: "new", Status: "Running", StartTime: "2026-07-02T11:00:00Z"},
+		{WorkflowID: "wf-b", RunID: "only", Status: "Completed", StartTime: "2026-07-01T09:00:00Z"},
+	}
+	got := currentRuns(runs)
+	byID := map[string]TemporalRun{}
+	for _, r := range got {
+		byID[r.WorkflowID] = r
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 runs (one per workflow ID), got %d: %+v", len(got), got)
+	}
+	if byID["wf-a"].RunID != "new" || byID["wf-a"].Status != "Running" {
+		t.Errorf("wf-a: want the Running run 'new', got %+v", byID["wf-a"])
+	}
+	if byID["wf-b"].RunID != "only" {
+		t.Errorf("wf-b: want the sole run 'only', got %+v", byID["wf-b"])
+	}
+}
+
+// With neither run Running (e.g. an old Failed run and a newer Terminated one),
+// currentRuns keeps the most recently started.
+func TestCurrentRuns_NoRunningPrefersLatest(t *testing.T) {
+	runs := []TemporalRun{
+		{WorkflowID: "wf-a", RunID: "newer", Status: "Terminated", StartTime: "2026-07-02T11:00:00Z"},
+		{WorkflowID: "wf-a", RunID: "older", Status: "Failed", StartTime: "2026-07-02T10:00:00Z"},
+	}
+	got := currentRuns(runs)
+	if len(got) != 1 || got[0].RunID != "newer" {
+		t.Fatalf("want the later-started run 'newer', got %+v", got)
+	}
+}
+
+// End-to-end through the list handler: a WorkflowID with a stale Terminated run
+// and a live Running run must render as Running, not terminated.
+func TestRunsHandler_SupersededRunIgnored(t *testing.T) {
+	base := t.TempDir()
+	wf := "decanter-yt-1"
+	s := &Server{Base: base, Temporal: &fakeReader{
+		status: "Running",
+		// Running first, Terminated last: without dedup the last row wins and
+		// clobbers the pill — the exact failure this guards against.
+		runs: []TemporalRun{
+			{WorkflowID: wf, RunID: "new", Status: "Running", StartTime: "2026-07-02T11:00:00Z"},
+			{WorkflowID: wf, RunID: "old", Status: "Terminated", StartTime: "2026-07-02T10:00:00Z"},
+		},
+	}}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var items []RunListItem
+	_ = json.Unmarshal(rec.Body.Bytes(), &items)
+	if len(items) != 1 {
+		t.Fatalf("want 1 run item, got %d: %+v", len(items), items)
+	}
+	if items[0].Status != "Running" || items[0].State == GateTerminated {
+		t.Fatalf("want live Running run, got status=%q state=%q", items[0].Status, items[0].State)
+	}
+}
+
 // A workflow ID with no workspace dir at all is genuinely not found → 404.
 func TestRunDetailHandler_UnknownRun(t *testing.T) {
 	base := t.TempDir()

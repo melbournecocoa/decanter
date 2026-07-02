@@ -32,6 +32,45 @@ type RunListItem struct {
 	EventName  string    `json:"eventName,omitempty"`
 }
 
+// currentRuns collapses visibility results to one execution per workflow ID:
+// the current run. A reset or terminate+restart leaves the superseded run in
+// visibility under the same WorkflowID, so ListWorkflow returns several rows
+// for one ID — and with no ORDER BY, in arbitrary order. The console only
+// tracks the live run, so keep the Running one (WorkflowId uniqueness allows at
+// most one open run per ID) or, failing that, the most recently started.
+// First-seen order is preserved for the survivors.
+func currentRuns(runs []TemporalRun) []TemporalRun {
+	best := map[string]TemporalRun{}
+	order := []string{}
+	for _, run := range runs {
+		cur, ok := best[run.WorkflowID]
+		if !ok {
+			order = append(order, run.WorkflowID)
+			best[run.WorkflowID] = run
+			continue
+		}
+		if supersedes(run, cur) {
+			best[run.WorkflowID] = run
+		}
+	}
+	out := make([]TemporalRun, 0, len(order))
+	for _, id := range order {
+		out = append(out, best[id])
+	}
+	return out
+}
+
+// supersedes reports whether run a is the more-current execution than b for the
+// same workflow ID: a Running run always wins (at most one is open at a time),
+// otherwise the later start time does. StartTime is an RFC3339 string from the
+// same server, so a lexical compare orders chronologically.
+func supersedes(a, b TemporalRun) bool {
+	if (a.Status == "Running") != (b.Status == "Running") {
+		return a.Status == "Running"
+	}
+	return a.StartTime > b.StartTime
+}
+
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]*RunListItem{}
 	order := []string{}
@@ -52,7 +91,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 			// a swallowed error here is exactly why every run showed "unknown".
 			log.Printf("handleRuns: list pipeline runs failed (states fall back to unknown): %v", err)
 		}
-		for _, run := range runs {
+		for _, run := range currentRuns(runs) {
 			item, ok := seen[run.WorkflowID]
 			if !ok {
 				item = &RunListItem{WorkflowID: run.WorkflowID}

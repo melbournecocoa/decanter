@@ -28,6 +28,16 @@ func TestClassifyState(t *testing.T) {
 			want:   GateUpload,
 		},
 		{
+			// Assembles fan out in one workflow task, so all are scheduled at
+			// once; the upload gate must wait for EVERY one to complete, not the
+			// first. Otherwise the pill flips to "ready for upload" while
+			// siblings are still encoding.
+			name:   "still assembling: review signalled but only some Assembles done",
+			sum:    HistorySummary{ChildrenInitiated: 3, CompletedActivities: map[string]int{"Assemble": 1}, ScheduledActivities: map[string]int{"Assemble": 3}, Signals: map[string]int{"review_approval": 1}},
+			status: "Running",
+			want:   GateRunning,
+		},
+		{
 			name:   "completed",
 			sum:    HistorySummary{},
 			status: "Completed",
