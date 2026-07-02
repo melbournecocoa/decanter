@@ -60,3 +60,9 @@ a { color:var(--accent); text-decoration:none; }
 .pbar-pct { font-size: 12px; margin-left: 8px; font-variant-numeric: tabular-nums; }
 .pbar-detail { color: var(--muted); font-size: 12px; margin-left: 8px; }
 .run-row-step { margin-left: auto; font-size: 12px; }
+.reason-section { margin-top: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.reason-section h3 { margin: 0 0 8px; }
+.reason-file { color: var(--muted); font-size: 12px; font-weight: 400; font-family: ui-monospace, monospace; }
+.reason-body { white-space: pre-wrap; color: var(--text); font-size: 13px; }
+.thumb-block { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin-top: 8px; }
+.thumb-preview { width: 280px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: #000; }

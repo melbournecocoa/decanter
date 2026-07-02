@@ -281,7 +281,6 @@ async function routeSegment(wf, idx) {
     api(`/api/runs/${encodeURIComponent(wf)}/segments/${idx}/metadata`).catch(() => ({ metadata: {}, reasoning: '' })),
     api('/api/runs/' + encodeURIComponent(wf)),
   ]);
-  const gate = detail.state;
   const m = Object.assign({ title:'', speaker:'', description:'', tags:[], chapters:[] }, metadata);
   const titleLen = [...(m.title || '')].length;
 
@@ -293,7 +292,6 @@ async function routeSegment(wf, idx) {
       <div id="timeline"></div>
       <div id="trimreadout" style="color:var(--muted);font-size:12px;margin-top:6px"></div>
       <button class="btn" id="markbumper" style="margin-top:8px">⚑ Mark bumper boundary at playhead</button>
-      ${reasoning ? `<details class="reason"><summary>metadata_reasoning.md</summary>${esc(reasoning)}</details>` : ''}
     </div>
     <div class="panel">
       <div class="field"><label>Title <span id="tc" class="counter ${titleLen>100?'over':''}">${titleLen}/100</span></label>
@@ -304,12 +302,10 @@ async function routeSegment(wf, idx) {
       <div class="field"><label><input type="checkbox" id="f-skip" ${m.skip?'checked':''}> Skip this segment</label></div>
       <div class="row-actions">
         <button class="btn" id="save">Save</button>
-        <button class="btn btn-go" id="approve" ${gate==='review_gate'?'':'disabled'}>✓ Approve review</button>
-        <button class="btn btn-no" id="reject" ${gate==='review_gate'?'':'disabled'}>Reject</button>
       </div>
-      <p id="gatehint" style="color:var(--muted);font-size:12px"></p>
     </div>
-  </div>`;
+  </div>
+  ${reasoning ? `<section class="reason-section"><h3>Reasoning <span class="reason-file">metadata_reasoning.md</span></h3><div class="reason-body">${esc(reasoning)}</div></section>` : ''}`;
 
   const titleEl = document.getElementById('f-title');
   titleEl.addEventListener('input', () => {
@@ -331,22 +327,6 @@ async function routeSegment(wf, idx) {
     toast('Saved');
   };
   document.getElementById('save').onclick = () => save().catch(e => toast(e.message));
-  document.getElementById('approve').onclick = async () => {
-    await save();
-    await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'review', approved:true }) });
-    toast('Review approved'); location.hash = `#/run/${encodeURIComponent(wf)}`;
-  };
-  document.getElementById('reject').onclick = () => confirmDialog({
-    title: 'Reject review?',
-    bodyHTML: '<p>Rejecting <strong>fails the entire workflow run</strong> — it does not re-open the gate. You would need to start a new run.</p>',
-    confirmLabel: 'Reject & fail run',
-    onConfirm: async () => {
-      await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gate: 'review', approved: false }) });
-      toast('Review rejected — run failed');
-    },
-  });
-  if (gate === 'upload_gate') document.getElementById('gatehint').textContent =
-    'Parked at upload. Title/description/tags edits are picked up on upload — just re-approve there. A trim change needs a Redo Assemble (run it from the run overview).';
 
   document.getElementById('markbumper').onclick = () =>
     markBumperAtPlayhead(wf, idx, document.getElementById('vid')).catch(e => toast(e.message));
@@ -356,7 +336,6 @@ async function routeSegment(wf, idx) {
 async function routeUpload(wf, idx) {
   const { metadata } = await api(`/api/runs/${encodeURIComponent(wf)}/segments/${idx}/metadata`);
   const detail = await api('/api/runs/' + encodeURIComponent(wf));
-  const gate = detail.state;
   const m = metadata || {};
   app.innerHTML = `
   <p><a href="#/run/${encodeURIComponent(wf)}">← ${esc(detail.event.eventName || wf)}</a> · upload preview · segment ${String(idx).padStart(2,'0')}</p>
@@ -367,9 +346,9 @@ async function routeUpload(wf, idx) {
         <track default kind="subtitles" srclang="en" label="English"
                src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/subtitles">
       </video>
-      <div class="row-actions">
+      <div class="thumb-block">
+        <img id="thumb" class="thumb-preview" src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/thumbnail" alt="thumbnail">
         <button class="btn" id="grabthumb">Use current frame as thumbnail</button>
-        <img id="thumb" src="/api/runs/${encodeURIComponent(wf)}/segments/${idx}/thumbnail" alt="" style="height:54px;border-radius:4px;border:1px solid var(--border)">
       </div>
     </div>
     <div class="panel">
@@ -378,10 +357,6 @@ async function routeUpload(wf, idx) {
       <p style="white-space:pre-wrap">${esc(m.description || '')}</p>
       <div class="chips">${(m.tags||[]).map(t => `<span>${esc(t)}</span>`).join('')}</div>
       ${(m.chapters||[]).length ? `<h4>Chapters</h4>${m.chapters.map(c => `<div>${esc(c.title)} — ${Math.floor(c.time/60)}:${String(Math.floor(c.time%60)).padStart(2,'0')}</div>`).join('')}` : ''}
-      <div class="row-actions">
-        <button class="btn btn-go" id="approve" ${gate==='upload_gate'?'':'disabled'}>✓ Approve upload</button>
-        <button class="btn btn-no" id="reject" ${gate==='upload_gate'?'':'disabled'}>Reject</button>
-      </div>
     </div>
   </div>`;
 
@@ -392,19 +367,6 @@ async function routeUpload(wf, idx) {
     document.getElementById('thumb').src = `/api/runs/${encodeURIComponent(wf)}/segments/${idx}/thumbnail?ts=${Date.now()}`;
     toast('Thumbnail updated');
   };
-  document.getElementById('approve').onclick = async () => {
-    await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ gate:'upload', approved:true }) });
-    toast('Upload approved'); location.hash = `#/run/${encodeURIComponent(wf)}`;
-  };
-  document.getElementById('reject').onclick = () => confirmDialog({
-    title: 'Reject upload?',
-    bodyHTML: '<p>Rejecting <strong>fails the entire workflow run</strong> — it does not re-open the gate. You would need to start a new run.</p>',
-    confirmLabel: 'Reject & fail run',
-    onConfirm: async () => {
-      await api(`/api/runs/${encodeURIComponent(wf)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gate: 'upload', approved: false }) });
-      toast('Upload rejected — run failed');
-    },
-  });
 }
 function confirmDialog({ title, bodyHTML, confirmLabel, onConfirm }) {
   const back = document.createElement('div'); back.className = 'dialog-backdrop';
