@@ -47,3 +47,16 @@ a { color:var(--accent); text-decoration:none; }
 .banner .row-actions { margin-top: 0; }
 .banner-phase { color: var(--muted); text-transform: capitalize; }
 @media (max-width: 900px) { .run-grid { grid-template-columns: 1fr; } }
+.conn { color: #7ee0a8; font-size: 12px; }
+.banner-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dots { letter-spacing: 1px; }
+.dot { color: #38414d; } .dot.on { color: var(--accent); }
+.dot-sep { color: #38414d; }
+.dots-label { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.status-label { color: var(--muted); font-size: 12px; margin-right: 6px; }
+.status-glyph { color: #7ee0a8; }
+.pbar { display: inline-block; width: 160px; height: 8px; background: #1b2330; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; overflow: hidden; }
+.pbar-fill { display: block; height: 100%; background: linear-gradient(90deg, #1d3a52, #4c8eda); }
+.pbar-pct { font-size: 12px; margin-left: 8px; font-variant-numeric: tabular-nums; }
+.pbar-detail { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.run-row-step { margin-left: auto; font-size: 12px; }

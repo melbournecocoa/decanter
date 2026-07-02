@@ -11,16 +11,137 @@ const toast = (msg) => {
 };
 const esc = (s) => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-function startStatusPoll(_wf) { /* replaced in Task 7 */ }
+let _pollTimer = null;
+let _pollWf = null;
+const POLL_MS = 2000;
+const POLL_TERMINAL = new Set(['review_gate', 'upload_gate', 'completed', 'failed', 'terminated']);
+
+function stopStatusPoll() {
+  if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
+  _pollWf = null;
+  setConn('');
+}
+function setConn(text) {
+  const c = document.getElementById('conn');
+  if (c) c.textContent = text;
+}
+
+async function pollOnce(wf) {
+  if (_pollWf !== wf) return; // route changed
+  let rs;
+  try { rs = await api(`/api/runs/${encodeURIComponent(wf)}/status`); }
+  catch { setConn('· status unavailable'); schedulePoll(wf); return; }
+  if (_pollWf !== wf) return;
+
+  renderRunningBanner(wf, rs);
+  (rs.segments || []).forEach(s => renderSegStatus(wf, s));
+
+  if (POLL_TERMINAL.has(rs.state)) { setConn(''); _pollTimer = null; _pollWf = null; return; }
+  setConn('● live');
+  schedulePoll(wf);
+}
+function schedulePoll(wf) {
+  if (document.hidden) { _pollTimer = null; return; } // resumed by visibilitychange
+  _pollTimer = setTimeout(() => pollOnce(wf), POLL_MS);
+}
+function startStatusPoll(wf) {
+  stopStatusPoll();
+  _pollWf = wf;
+  pollOnce(wf);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && _pollWf && !_pollTimer) pollOnce(_pollWf);
+});
+
+// renderRunningBanner only touches the banner while NOT at a gate (the gate
+// banner is owned by renderGateBanner and must not be overwritten).
+function renderRunningBanner(wf, rs) {
+  if (POLL_TERMINAL.has(rs.state)) { renderGateBannerFromState(wf, rs); return; }
+  const el = document.getElementById('run-banner');
+  if (!el) return;
+  const done = (rs.segments || []).filter(s => s.phase === 'done' || s.phase === 'uploaded').length;
+  const total = (rs.segments || []).filter(s => s.phase !== 'skipped').length;
+  el.className = 'banner';
+  el.innerHTML = `<span class="banner-phase">⟳ ${esc((rs.phase || 'running').replace(/_/g, ' '))}</span>
+    <span class="banner-count">${done}/${total} done</span>`;
+}
+
+// If the poll observes we've reached a gate, re-render the gate banner by
+// re-fetching the run detail (cheap, and gives us the segment summary counts).
+async function renderGateBannerFromState(wf, rs) {
+  if (rs.state !== 'review_gate' && rs.state !== 'upload_gate') {
+    const el = document.getElementById('run-banner');
+    if (el) { el.className = 'banner'; el.innerHTML = `<span class="banner-phase">${esc(rs.state.replace(/_/g, ' '))}</span>`; }
+    return;
+  }
+  try {
+    const d = await api('/api/runs/' + encodeURIComponent(wf));
+    renderGateBanner(wf, d);
+  } catch { /* leave as-is */ }
+}
+
+function dots(step) {
+  let s = '';
+  const labels = ['Classify', 'Transcribe', 'Clean', 'Meta'];
+  for (let i = 1; i <= 4; i++) s += `<span class="dot ${i <= step.current ? 'on' : ''}">●</span>${i < 4 ? '<span class="dot-sep">─</span>' : ''}`;
+  return `<span class="dots">${s}</span><span class="dots-label">${esc(labels[step.current - 1] || '')}</span>`;
+}
+
+function bar(percent, detail) {
+  const p = Math.max(0, Math.min(100, percent));
+  return `<span class="pbar"><span class="pbar-fill" style="width:${p}%"></span></span>
+    <span class="pbar-pct">${p}%</span>${detail ? `<span class="pbar-detail">${esc(detail)}</span>` : ''}`;
+}
+
+function renderSegStatus(wf, s) {
+  const el = document.getElementById(`seg-status-${s.index}`);
+  if (!el) return;
+  if (s.step) { el.innerHTML = dots(s.step); return; }
+  if (s.percent != null) {
+    const label = s.phase === 'uploading' ? 'Upload' : 'Assemble';
+    el.innerHTML = `<span class="status-label">${label}</span> ${bar(s.percent, s.detail)}`;
+    return;
+  }
+  const glyph = { done: '✓', uploaded: '✓', skipped: '', queued: '· queued' }[s.phase] || '';
+  el.innerHTML = glyph ? `<span class="status-glyph">${glyph}</span>` : '';
+
+  // reveal the upload-preview button the moment a final appears mid-run
+  if (s.hasFinal) {
+    const row = document.getElementById(`seg-row-${s.index}`);
+    if (row && !row.querySelector('.up-link') && s.phase !== 'skipped') {
+      const main = row.querySelector('.seg-main');
+      const a = document.createElement('a');
+      a.className = 'btn btn-sm up-link';
+      a.href = `#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload`;
+      a.textContent = '▸ upload preview';
+      main.appendChild(a);
+    }
+  }
+}
 
 async function routeRuns() {
   const runs = await api('/api/runs');
   app.innerHTML = `<h2>Runs</h2><div class="runs">${runs.map(r => `
     <a class="run-row" href="#/run/${encodeURIComponent(r.workflowId)}">
-      <span class="badge b-${r.state.replace('_gate','')}">${esc(r.state.replace('_',' '))}</span>
+      <span class="badge b-${r.state.replace('_gate','')}">${esc(r.state.replace(/_/g,' '))}</span>
       <strong>${esc(r.eventName || r.workflowId)}</strong>
-      <span style="color:var(--muted)">${esc(r.workflowId)}</span>
+      <span class="run-row-step" data-wf="${esc(r.workflowId)}" style="color:var(--muted)"></span>
     </a>`).join('')}</div>`;
+  // lightweight: only running rows get a live current-step line
+  runs.filter(r => r.status === 'Running').forEach(async r => {
+    try {
+      const rs = await api(`/api/runs/${encodeURIComponent(r.workflowId)}/status`);
+      const el = document.querySelector(`.run-row-step[data-wf="${CSS.escape(r.workflowId)}"]`);
+      if (el) el.textContent = phaseLine(rs);
+    } catch { /* ignore */ }
+  });
+}
+function phaseLine(rs) {
+  const done = (rs.segments || []).filter(s => s.phase === 'done' || s.phase === 'uploaded').length;
+  const total = (rs.segments || []).filter(s => s.phase !== 'skipped').length;
+  if (rs.phase === 'assembling' || rs.phase === 'uploading') return `${rs.phase} ${done}/${total}`;
+  return (rs.phase || '').replace(/_/g, ' ');
 }
 
 async function routeRun(wf) {
@@ -30,7 +151,7 @@ async function routeRun(wf) {
     const badge = s.skip ? 'skip' : s.type;
     const isTalk = s.type === 'talk' && !s.skip;
     const upBtn = (isTalk && s.hasFinal)
-      ? `<a class="btn btn-sm" href="#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload">▸ upload preview</a>`
+      ? `<a class="btn btn-sm up-link" href="#/run/${encodeURIComponent(wf)}/seg/${s.index}/upload">▸ upload preview</a>`
       : '';
     return `<div class="seg-row" id="seg-row-${s.index}">
       <div class="seg-main">
@@ -122,6 +243,7 @@ function renderGateBanner(wf, d) {
 }
 
 function router() {
+  stopStatusPoll();
   const h = location.hash || '#/';
   const m = h.match(/^#\/run\/([^/]+)(?:\/seg\/(\d+)(\/upload)?)?$/);
   document.getElementById('conn').textContent = '';
