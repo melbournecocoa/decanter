@@ -50,6 +50,29 @@ func TestListRunSegments(t *testing.T) {
 	}
 }
 
+// A run that hasn't reached Split has no segments/ dir yet — a valid empty
+// state, not an error (Split creates the dir). Regression: ListRunSegments used
+// to propagate the ReadDir ENOENT, which handleRunDetail then 404'd as
+// "run not found" for legitimately in-flight, pre-Split runs.
+func TestListRunSegments_NoSegmentsDir(t *testing.T) {
+	base := t.TempDir()
+	wf := "decanter-yt-early"
+	// Run dir exists (Download ran) but Split hasn't created segments/ yet.
+	if err := os.MkdirAll(WorkspacePath(base, wf), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := ListRunSegments(base, wf)
+	if err != nil {
+		t.Fatalf("pre-Split run should list zero segments, got error: %v", err)
+	}
+	if segs == nil {
+		t.Fatal("want empty non-nil slice so it marshals to [] not null")
+	}
+	if len(segs) != 0 {
+		t.Fatalf("want 0 segments, got %d", len(segs))
+	}
+}
+
 func TestListRunSegments_HasFinal(t *testing.T) {
 	base := t.TempDir()
 	wf := "wf1"

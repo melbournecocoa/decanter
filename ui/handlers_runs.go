@@ -68,9 +68,15 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunDetail(w http.ResponseWriter, r *http.Request) {
 	wf := r.PathValue("wf")
+	// A run "exists" if its workspace dir does — segments/ appears only after
+	// Split, so it can't stand in for existence for early-stage runs.
+	if !statExists(WorkspacePath(s.Base, wf)) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found: " + wf})
+		return
+	}
 	segs, err := ListRunSegments(s.Base, wf)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	event, _ := ReadEvent(s.Base, wf)

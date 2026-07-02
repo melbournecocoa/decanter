@@ -61,3 +61,41 @@ func TestRunDetailHandler(t *testing.T) {
 		t.Fatalf("want 3 segments: %v", body["segments"])
 	}
 }
+
+// An in-flight run that hasn't reached Split (no segments/ dir) must still
+// resolve to 200 with an empty segment list, not 404 "run not found".
+func TestRunDetailHandler_EarlyStage(t *testing.T) {
+	base := t.TempDir()
+	wf := "decanter-yt-20260702-211524"
+	// Download ran (workspace dir + event.json exist) but Split hasn't.
+	if err := os.MkdirAll(WorkspacePath(base, wf), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(EventPath(base, wf), []byte(`{"eventName":"No. 160"}`), 0o644)
+
+	s := &Server{Base: base, Temporal: &fakeReader{status: "Running"}}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs/"+wf, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("early-stage run should be 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if segs, ok := body["segments"].([]any); !ok || len(segs) != 0 {
+		t.Fatalf("want empty segments, got %v", body["segments"])
+	}
+	if body["event"].(map[string]any)["eventName"] != "No. 160" {
+		t.Fatalf("event missing: %v", body)
+	}
+}
+
+// A workflow ID with no workspace dir at all is genuinely not found → 404.
+func TestRunDetailHandler_UnknownRun(t *testing.T) {
+	base := t.TempDir()
+	s := &Server{Base: base, Temporal: &fakeReader{status: "Running"}}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs/does-not-exist", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown run should be 404, got %d", rec.Code)
+	}
+}

@@ -41,6 +41,11 @@ func ListRunSegments(base, wf string) ([]SegmentInfo, error) {
 	segDir := filepath.Join(WorkspacePath(base, wf), "segments")
 	entries, err := os.ReadDir(segDir)
 	if err != nil {
+		// Split creates segments/; a run that hasn't reached Split has zero
+		// segments — a valid empty state, not an error.
+		if os.IsNotExist(err) {
+			return []SegmentInfo{}, nil
+		}
 		return nil, err
 	}
 	var idxs []int
