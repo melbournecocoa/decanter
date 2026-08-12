@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 
 	"go.temporal.io/sdk/activity"
 
@@ -39,6 +38,25 @@ Instructions:
 
 SRT file path: `
 
+// cleanTranscriptCommand builds the claude CLI invocation for transcript
+// cleaning. Extracted to mirror gatherMetadataCommand and to keep the shared
+// runClaudeCLI runner command-agnostic. --output-format json makes the CLI print
+// a result envelope (turn count, wall time) that runClaudeCLI logs for
+// diagnostics; the actual cleaning happens via the Edit tool on the SRT file, so
+// the output format does not affect the product.
+func cleanTranscriptCommand(ctx context.Context, prompt string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "claude",
+		"-p", prompt,
+		"--output-format", "json",
+		"--model", "sonnet",
+		"--no-session-persistence",
+		"--allowedTools", "Read,Edit",
+	)
+	// Ensure claude CLI doesn't think it's nested inside another session.
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
+	return cmd
+}
+
 func (a *Activities) CleanTranscript(ctx context.Context, input model.CleanTranscriptInput) (model.CleanTranscriptOutput, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("Cleaning transcript", "segmentIndex", input.Segment.Index)
@@ -60,40 +78,14 @@ func (a *Activities) CleanTranscript(ctx context.Context, input model.CleanTrans
 		return model.CleanTranscriptOutput{}, fmt.Errorf("copy SRT: %w", err)
 	}
 
-	// Background heartbeat ticker for long API calls.
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				activity.RecordHeartbeat(ctx, "waiting for Claude response")
-			}
-		}
-	}()
-
 	prompt := cleanTranscriptPrompt + cleanPath
 	if input.MeetupEventPath != "" {
 		prompt += "\nMeetup event JSON file path: " + filepath.Join(wsDir, input.MeetupEventPath)
 	}
-	cmd := exec.CommandContext(ctx, "claude",
-		"-p", prompt,
-		"--output-format", "text",
-		"--model", "sonnet",
-		"--no-session-persistence",
-		"--allowedTools", "Read,Edit",
-	)
-	// Ensure claude CLI doesn't think it's nested inside another session.
-	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
-
-	if err := cmd.Run(); err != nil {
-		close(done)
-		return model.CleanTranscriptOutput{}, fmt.Errorf("claude CLI failed: %w", err)
+	cmd := cleanTranscriptCommand(ctx, prompt)
+	if err := runClaudeCLI(ctx, cmd, logger, fmt.Sprintf("CleanTranscript seg-%02d", input.Segment.Index)); err != nil {
+		return model.CleanTranscriptOutput{}, err
 	}
-	close(done)
 
 	logger.Info("Transcript cleaned", "path", cleanRelPath)
 	return model.CleanTranscriptOutput{SubtitlePath: cleanRelPath}, nil

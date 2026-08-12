@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"go.temporal.io/sdk/activity"
 
@@ -81,7 +80,7 @@ func buildGatherMetadataPrompt(srtPath, meetupPath string) string {
 func gatherMetadataCommand(ctx context.Context, prompt string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p", prompt,
-		"--output-format", "text",
+		"--output-format", "json",
 		"--model", "sonnet",
 		"--no-session-persistence",
 		"--allowedTools", "Read,Write",
@@ -220,33 +219,15 @@ func (a *Activities) GatherMetadata(ctx context.Context, input model.GatherMetad
 	srtPath := filepath.Join(wsDir, input.SubtitlePath)
 	metadataPath := filepath.Join(filepath.Dir(srtPath), "metadata.json")
 
-	// Background heartbeat ticker for long API calls.
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				activity.RecordHeartbeat(ctx, "waiting for Claude response")
-			}
-		}
-	}()
-
 	meetupPath := ""
 	if input.MeetupEventPath != "" {
 		meetupPath = filepath.Join(wsDir, input.MeetupEventPath)
 	}
 	prompt := buildGatherMetadataPrompt(srtPath, meetupPath)
 	cmd := gatherMetadataCommand(ctx, prompt)
-
-	if err := cmd.Run(); err != nil {
-		close(done)
-		return model.GatherMetadataOutput{}, fmt.Errorf("claude CLI failed: %w", err)
+	if err := runClaudeCLI(ctx, cmd, logger, fmt.Sprintf("GatherMetadata seg-%02d", input.Segment.Index)); err != nil {
+		return model.GatherMetadataOutput{}, err
 	}
-	close(done)
 
 	// Append a fixed reviewer cheat sheet to metadata_reasoning.md. The LLM
 	// writes the upper portion (its decisions); this footer documents
