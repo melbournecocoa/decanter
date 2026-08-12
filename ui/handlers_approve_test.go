@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	historypb "go.temporal.io/api/history/v1"
+
+	"github.com/melbournecocoa/decanter/model"
 )
 
 type fakeController struct {
@@ -71,6 +73,71 @@ func TestApproveAndReset(t *testing.T) {
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/runs/"+wf+"/reset/redo-split", bytes.NewReader(body2)))
 	if rec.Code != http.StatusOK || !fc.resetCalled || fc.resetEventID != 4 {
 		t.Fatalf("execute: %d called=%v id=%d", rec.Code, fc.resetCalled, fc.resetEventID)
+	}
+}
+
+// The redo-split preview must report what DetectBumpers will actually read off
+// disk. Unsaved edits in the bumpers panel are invisible to the worker, so a
+// preview that stays silent lets a reviewer reset into the same failure.
+func TestResetPreviewReportsBumpersOnDisk(t *testing.T) {
+	base := t.TempDir()
+	wf := "decanter-yt-1"
+	_ = ensureDir(WorkspacePath(base, wf))
+
+	events := []*historypb.HistoryEvent{
+		wfTaskStarted(4),
+		schedActivity(6, "DetectBumpers"),
+		wfTaskStarted(8),
+		schedActivity(10, "Assemble"),
+	}
+	s := &Server{Base: base, Control: &fakeController{}, Temporal: &fakeReader{events: events, status: "Running"}}
+
+	preview := func(recipe string) map[string]any {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs/"+wf+"/reset/"+recipe, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s preview: %d %s", recipe, rec.Code, rec.Body)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode %s preview: %v", recipe, err)
+		}
+		return out
+	}
+
+	// No bumpers.json yet: count 0 is the signal that detection will re-run and
+	// fail again exactly as before.
+	got := preview("redo-split")
+	if c, ok := got["bumperCount"].(float64); !ok || c != 0 {
+		t.Fatalf("missing bumpers → want bumperCount 0, got %v", got["bumperCount"])
+	}
+
+	// Saved sidecar: report the count and the boundaries themselves so the
+	// reviewer can confirm the times are the ones they entered.
+	if err := WriteBumpers(BumpersPath(base, wf), []model.BumperRegion{
+		{VisualStart: 6330, VisualEnd: 6330},
+		{VisualStart: 3065, VisualEnd: 3065},
+	}); err != nil {
+		t.Fatalf("write bumpers: %v", err)
+	}
+	got = preview("redo-split")
+	if c := got["bumperCount"].(float64); c != 2 {
+		t.Fatalf("want bumperCount 2, got %v", c)
+	}
+	list, _ := got["bumpers"].([]any)
+	if len(list) != 2 {
+		t.Fatalf("want 2 bumpers echoed, got %v", got["bumpers"])
+	}
+	// WriteBumpers sorts, so the preview reflects worker order, not entry order.
+	if first := list[0].(map[string]any)["visual_start"].(float64); first != 3065 {
+		t.Fatalf("want boundaries sorted ascending, got %v", list)
+	}
+
+	// redo-assemble does not consume bumpers.json — stay silent rather than
+	// implying the reset depends on it.
+	if got := preview("redo-assemble"); got["bumperCount"] != nil {
+		t.Fatalf("redo-assemble must not report bumpers, got %v", got["bumperCount"])
 	}
 }
 

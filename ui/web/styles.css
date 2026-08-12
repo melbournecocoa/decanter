@@ -260,6 +260,10 @@ h3 { font-family:var(--serif); font-weight:600; font-size:17px; margin:0 0 10px;
 .dialog h3 { font-family:var(--serif); }
 .cmd { background:var(--inset); border:1px solid var(--border); border-radius:7px; padding:9px;
   font-family:var(--mono); font-size:12px; white-space:pre-wrap; word-break:break-all; color:var(--muted); }
+.reset-note { margin:9px 0; font-size:13px; line-height:1.5; }
+.reset-note.ok { color:var(--go); }
+.reset-note.bad { color:var(--rust); border-left:2px solid var(--rust); padding-left:9px; }
+.reset-note .faint { color:var(--faint); }
 .toast { position:fixed; bottom:18px; right:18px; background:var(--panel);
   border:1px solid var(--border); border-radius:9px; padding:11px 15px;
   box-shadow:0 10px 30px rgba(0,0,0,.4); z-index:60; }

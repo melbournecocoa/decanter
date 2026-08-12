@@ -507,6 +507,41 @@ function renderBumpersPanel(wf, detail) {
   };
 }
 
+// Summarise what the anchor activity will actually read off disk. The bumpers
+// panel holds edits in memory until "Save bumpers.json" is pressed, so a
+// boundary that was added but not saved is invisible to the worker and the
+// reset fails identically. Returns '' for recipes that don't use the sidecar.
+function bumperSummaryHTML(prev) {
+  if (prev.bumperCount === undefined || prev.bumperCount === null) return '';
+  if (!prev.bumperCount) {
+    return `<p class="reset-note bad"><strong>No bumpers.json on disk.</strong> Detection will
+      run again and fail the same way. Add your boundaries in the Bumpers panel and press
+      <em>Save bumpers.json</em> before resetting.</p>`;
+  }
+  // Source-absolute times, so roll over to h:mm:ss — these get compared against
+  // a player's scrubber on a 1-2 hour stream, where "105:30" reads as a typo.
+  const clock = (t) => {
+    const s = Math.floor(t % 60), m = Math.floor(t / 60) % 60, h = Math.floor(t / 3600);
+    const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+    return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+  };
+  const rows = (prev.bumpers || []).map(b => b.visual_start === b.visual_end
+    ? `${clock(b.visual_start)} <span class="faint">— ${b.visual_start}s, manual boundary</span>`
+    : `${clock(b.visual_start)} → ${clock(b.visual_end)} <span class="faint">— ${b.visual_start}–${b.visual_end}s</span>`
+  ).join('<br>');
+  // Classify is positional: index 0 is welcome, the last index is wrap-up, and
+  // both are dropped. Fewer than 2 boundaries therefore yields no talks at all.
+  const segments = prev.bumperCount + 1, talks = segments - 2;
+  const verdict = talks < 1
+    ? `<p class="reset-note bad"><strong>This produces no talks.</strong> ${segments} segments —
+       the first is classified <em>welcome</em> and the last <em>wrap-up</em>, both dropped.
+       Add another boundary (a zero-width one near the end of the stream works).</p>`
+    : `<p class="reset-note ok">${segments} segments → <strong>${talks} talk${talks === 1 ? '' : 's'}</strong>
+       (first is welcome, last is wrap-up, both dropped).</p>`;
+  return `<p class="reset-note">Using <strong>${prev.bumperCount}</strong> boundar${prev.bumperCount === 1 ? 'y' : 'ies'} from bumpers.json:</p>
+    <div class="cmd">${rows}</div>${verdict}`;
+}
+
 function renderResetPanel(wf, detail) {
   const el = document.getElementById('reset-panel');
   el.innerHTML = `<div class="panel"><strong>Recovery resets</strong>
@@ -518,7 +553,7 @@ function renderResetPanel(wf, detail) {
     const prev = await api(`/api/runs/${encodeURIComponent(wf)}/reset/${recipe}`);
     confirmDialog({
       title: prev.label,
-      bodyHTML: `<p>${esc(prev.explanation)}</p><p>Resets to event <strong>${prev.targetEventId}</strong>, excluding old signals so the gates re-block.</p>${prev.command ? `<div class="cmd">${esc(prev.command)}</div>` : ''}`,
+      bodyHTML: `<p>${esc(prev.explanation)}</p>${bumperSummaryHTML(prev)}<p>Resets to event <strong>${prev.targetEventId}</strong>, excluding old signals so the gates re-block.</p>${prev.command ? `<div class="cmd">${esc(prev.command)}</div>` : ''}`,
       confirmLabel: 'Run reset',
       onConfirm: async () => {
         await api(`/api/runs/${encodeURIComponent(wf)}/reset/${recipe}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ targetEventId: prev.targetEventId }) });

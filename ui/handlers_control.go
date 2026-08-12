@@ -161,13 +161,26 @@ func (s *Server) handleResetPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	reason := "decanter-ui: " + recipe.Key
 	command := "temporal " + strings.Join(buildResetArgs(s.Addr, wf, id, reason), " ")
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"recipe":        recipe.Key,
 		"label":         recipe.Label,
 		"explanation":   recipe.Explanation,
 		"targetEventId": id,
 		"command":       command,
-	})
+	}
+	// Echo the sidecar the anchor activity will read. A missing or unreadable
+	// file reports zero rather than erroring — "detection will re-run" is the
+	// useful answer here, not a failed preview.
+	if recipe.UsesBumpers {
+		bumpers, _ := ReadBumpers(BumpersPath(s.Base, wf))
+		rows := make([]bumperJSON, len(bumpers))
+		for i, b := range bumpers {
+			rows[i] = bumperJSON{VisualStart: b.VisualStart, VisualEnd: b.VisualEnd}
+		}
+		out["bumperCount"] = len(rows)
+		out["bumpers"] = rows
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleResetExecute(w http.ResponseWriter, r *http.Request) {

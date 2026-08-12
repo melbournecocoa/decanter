@@ -13,6 +13,11 @@ type ResetRecipe struct {
 	AnchorActivity string // first scheduled activity to land just before
 	Label          string
 	Explanation    string
+	// UsesBumpers marks recipes whose anchor activity consumes bumpers.json.
+	// The preview reports the on-disk sidecar for these so a reviewer sees what
+	// the worker will actually read — the bumpers panel edits in-memory state
+	// until Save is pressed, so an unsaved boundary is invisible to the reset.
+	UsesBumpers bool
 }
 
 var ResetRecipes = map[string]ResetRecipe{
@@ -21,6 +26,7 @@ var ResetRecipes = map[string]ResetRecipe{
 		AnchorActivity: "DetectBumpers",
 		Label:          "Redo Split (missed bumper)",
 		Explanation:    "Re-runs DetectBumpers (reading your edited bumpers.json) → Split → all per-segment work. Keeps Download & Meetup results. You'll re-review both gates.",
+		UsesBumpers:    true,
 	},
 	"redo-assemble": {
 		Key:            "redo-assemble",
