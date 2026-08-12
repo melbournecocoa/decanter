@@ -115,6 +115,25 @@ def test_walk_forward_with_fast_fade():
     assert result == pytest_approx(0.4)
 
 
+def test_silence_command_skips_video_decode():
+    # silencedetect only needs the audio stream. Decoding the video too (no -vn)
+    # dominated the pass — ~197s of a 208s run on the 12 Mbps mimoLive master —
+    # for zero benefit. The command must pass -vn so ffmpeg never decodes video.
+    cmd = db.build_silence_command("/path/to/video.mp4")
+    assert "-vn" in cmd
+
+
+def test_silence_command_preserves_detection_shape():
+    # The -vn optimisation must not alter what silencedetect actually does:
+    # same binary, same input, same filter/threshold, discarding to null.
+    cmd = db.build_silence_command("/path/to/video.mp4")
+    assert cmd[0] == "ffmpeg"
+    assert "/path/to/video.mp4" in cmd
+    joined = " ".join(cmd)
+    assert f"silencedetect=noise={db.SILENCE_NOISE_DB}dB:d={db.SILENCE_CANDIDATE_DURATION}" in joined
+    assert cmd[-3:] == ["-f", "null", "-"]
+
+
 def test_merge_silence_empty_returns_empty():
     assert db.merge_silence_regions([]) == []
 

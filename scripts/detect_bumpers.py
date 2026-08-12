@@ -58,14 +58,25 @@ PLATEAU_DELTA = 3
 PLATEAU_HIGH = 45  # 1.5x DHASH_THRESHOLD — guards against false plateau on a static bumper frame
 
 
-def detect_silence(video_path: str) -> list[tuple[float, float]]:
-    """Run ffmpeg silencedetect and parse silent regions from stderr."""
-    cmd = [
-        "ffmpeg", "-i", video_path,
+def build_silence_command(video_path: str) -> list[str]:
+    """Build the ffmpeg silencedetect command for video_path.
+
+    -vn skips video decoding entirely. silencedetect is an audio-only filter, but
+    without -vn ffmpeg still demuxes and decodes the whole video stream front to
+    back — which dominated the pass: ~197s of a 208s run on the 12 Mbps mimoLive
+    master, versus ~11s audio-only. The video decode contributes nothing to
+    silence detection, so the detected regions are unchanged.
+    """
+    return [
+        "ffmpeg", "-i", video_path, "-vn",
         "-af", f"silencedetect=noise={SILENCE_NOISE_DB}dB:d={SILENCE_CANDIDATE_DURATION}",
         "-f", "null", "-",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+
+
+def detect_silence(video_path: str) -> list[tuple[float, float]]:
+    """Run ffmpeg silencedetect and parse silent regions from stderr."""
+    result = subprocess.run(build_silence_command(video_path), capture_output=True, text=True)
 
     regions = []
     starts = re.findall(r"silence_start: ([\d.]+)", result.stderr)
