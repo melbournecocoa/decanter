@@ -542,6 +542,20 @@ function bumperSummaryHTML(prev) {
     <div class="cmd">${rows}</div>${verdict}`;
 }
 
+// Temporal keeps the base run's children alive across a reset, so the reset
+// terminates them first (otherwise the new run collides with them and the whole
+// pipeline fails). Name them: a running SegmentWorkflow is minutes of
+// transcription and metadata work that is about to be thrown away and redone.
+function pendingChildrenHTML(prev) {
+  const kids = prev.pendingChildren || [];
+  if (!kids.length) return '';
+  const be = kids.length === 1 ? 'is' : 'are';
+  return `<p class="reset-note bad"><strong>${kids.length} segment workflow${kids.length === 1 ? '' : 's'} ${be} still
+    running</strong> and will be terminated before the reset. Their transcription and metadata work is
+    discarded and redone on the new run.</p>
+    <div class="cmd">${kids.map(esc).join('<br>')}</div>`;
+}
+
 function renderResetPanel(wf, detail) {
   const el = document.getElementById('reset-panel');
   el.innerHTML = `<div class="panel"><strong>Recovery resets</strong>
@@ -553,7 +567,7 @@ function renderResetPanel(wf, detail) {
     const prev = await api(`/api/runs/${encodeURIComponent(wf)}/reset/${recipe}`);
     confirmDialog({
       title: prev.label,
-      bodyHTML: `<p>${esc(prev.explanation)}</p>${bumperSummaryHTML(prev)}<p>Resets to event <strong>${prev.targetEventId}</strong>, excluding old signals so the gates re-block.</p>${prev.command ? `<div class="cmd">${esc(prev.command)}</div>` : ''}`,
+      bodyHTML: `<p>${esc(prev.explanation)}</p>${bumperSummaryHTML(prev)}${pendingChildrenHTML(prev)}<p>Resets to event <strong>${prev.targetEventId}</strong>, excluding old signals so the gates re-block.</p>${prev.command ? `<div class="cmd">${esc(prev.command)}</div>` : ''}`,
       confirmLabel: 'Run reset',
       onConfirm: async () => {
         await api(`/api/runs/${encodeURIComponent(wf)}/reset/${recipe}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ targetEventId: prev.targetEventId }) });

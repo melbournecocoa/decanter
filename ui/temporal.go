@@ -32,6 +32,7 @@ type ActivityProgress struct {
 // PendingChild is an open child workflow.
 type PendingChild struct {
 	WorkflowID string
+	RunID      string
 }
 
 // WorkflowDescription is the distilled DescribeWorkflowExecution view.
@@ -141,7 +142,10 @@ func (r *sdkReader) Describe(ctx context.Context, workflowID string) (*WorkflowD
 		})
 	}
 	for _, c := range resp.GetPendingChildren() {
-		out.Children = append(out.Children, PendingChild{WorkflowID: c.GetWorkflowId()})
+		out.Children = append(out.Children, PendingChild{
+			WorkflowID: c.GetWorkflowId(),
+			RunID:      c.GetRunId(),
+		})
 	}
 	return out, nil
 }

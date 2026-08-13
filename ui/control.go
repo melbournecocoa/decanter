@@ -12,6 +12,7 @@ import (
 type Controller interface {
 	Signal(ctx context.Context, workflowID, gate string, approved bool) error
 	Reset(ctx context.Context, workflowID string, eventID int64, reason string) error
+	Terminate(ctx context.Context, workflowID, runID, reason string) error
 }
 
 // gateSignal maps the UI gate key to the workflow signal name.
@@ -43,6 +44,21 @@ func buildResetArgs(addr, workflowID string, eventID int64, reason string) []str
 	}
 }
 
+// buildTerminateArgs kills one workflow. runID is optional — pinning it targets
+// the exact execution the parent is waiting on, but an empty --run-id is a CLI
+// error, so omit the flag entirely when we don't have one.
+func buildTerminateArgs(addr, workflowID, runID, reason string) []string {
+	args := []string{
+		"workflow", "terminate",
+		"--address", addr,
+		"--workflow-id", workflowID,
+	}
+	if runID != "" {
+		args = append(args, "--run-id", runID)
+	}
+	return append(args, "--reason", reason)
+}
+
 // cliController runs the real `temporal` binary.
 type cliController struct {
 	bin  string // "temporal"
@@ -70,4 +86,8 @@ func (c *cliController) Signal(ctx context.Context, workflowID, gate string, app
 
 func (c *cliController) Reset(ctx context.Context, workflowID string, eventID int64, reason string) error {
 	return c.run(ctx, buildResetArgs(c.addr, workflowID, eventID, reason))
+}
+
+func (c *cliController) Terminate(ctx context.Context, workflowID, runID, reason string) error {
+	return c.run(ctx, buildTerminateArgs(c.addr, workflowID, runID, reason))
 }

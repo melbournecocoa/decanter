@@ -168,6 +168,15 @@ func (s *Server) handleResetPreview(w http.ResponseWriter, r *http.Request) {
 		"targetEventId": id,
 		"command":       command,
 	}
+	// Open children get terminated by the reset (see handleResetExecute) — name
+	// them so the reviewer knows what work is about to be thrown away.
+	if kids, err := s.pendingChildren(r, wf); err == nil {
+		ids := make([]string, len(kids))
+		for i, c := range kids {
+			ids[i] = c.WorkflowID
+		}
+		out["pendingChildren"] = ids
+	}
 	// Echo the sidecar the anchor activity will read. A missing or unreadable
 	// file reports zero rather than erroring — "detection will re-run" is the
 	// useful answer here, not a failed preview.
@@ -215,9 +224,46 @@ func (s *Server) handleResetExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reason := "decanter-ui: " + recipe.Key
+	// Reset does NOT close the base run's children: an in-flight SegmentWorkflow
+	// outlives the reset, and the new run's StartChildWorkflowExecution then dies
+	// with "child workflow execution already started" — failing the whole
+	// pipeline and leaving nothing to re-signal. Kill them first, and abort if we
+	// can't, because resetting anyway walks straight into that collision.
+	// Terminate (not cancel): the child's work is being discarded regardless, and
+	// terminate is closed-on-return, so the reset's fan-out can reuse the ID.
+	killed, err := s.terminateChildren(r, wf, reason)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "terminate in-flight children: " + err.Error()})
+		return
+	}
 	if err := s.Control.Reset(r.Context(), wf, id, reason); err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "reset", "targetEventId": id})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "reset", "targetEventId": id, "terminatedChildren": killed})
+}
+
+// pendingChildren lists the current run's open child workflows.
+func (s *Server) pendingChildren(r *http.Request, wf string) ([]PendingChild, error) {
+	desc, err := s.Temporal.Describe(r.Context(), wf)
+	if err != nil {
+		return nil, err
+	}
+	return desc.Children, nil
+}
+
+// terminateChildren kills every open child of wf, returning the IDs it closed.
+func (s *Server) terminateChildren(r *http.Request, wf, reason string) ([]string, error) {
+	kids, err := s.pendingChildren(r, wf)
+	if err != nil {
+		return nil, err
+	}
+	killed := make([]string, 0, len(kids))
+	for _, c := range kids {
+		if err := s.Control.Terminate(r.Context(), c.WorkflowID, c.RunID, reason); err != nil {
+			return killed, fmt.Errorf("%s: %w", c.WorkflowID, err)
+		}
+		killed = append(killed, c.WorkflowID)
+	}
+	return killed, nil
 }
