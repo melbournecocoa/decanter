@@ -170,3 +170,22 @@ func TestResolveIntroPath(t *testing.T) {
 		})
 	}
 }
+
+func TestContentAudioFilter(t *testing.T) {
+	tests := []struct {
+		name   string
+		gainDB float64
+		want   string
+	}{
+		{"zero gain is plain loudnorm", 0, "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a1]"},
+		{"positive gain precedes loudnorm", 30, "[1:a]volume=30.0dB,loudnorm=I=-14:LRA=11:TP=-1.5[a1]"},
+		{"negative gain precedes loudnorm", -6.5, "[1:a]volume=-6.5dB,loudnorm=I=-14:LRA=11:TP=-1.5[a1]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := contentAudioFilter(tt.gainDB); got != tt.want {
+				t.Errorf("contentAudioFilter(%v) = %q, want %q", tt.gainDB, got, tt.want)
+			}
+		})
+	}
+}

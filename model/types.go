@@ -81,6 +81,10 @@ type TalkMetadata struct {
 	Chapters    []Chapter  `json:"chapters"`
 	Trim        *TrimRange `json:"trim,omitempty"`
 	Skip        bool       `json:"skip,omitempty"`
+	// AudioGainDB is a reviewer-set fixed gain (dB) applied to the talk's
+	// audio before Assemble's loudnorm. Use it when a very quiet recording
+	// leaves the start of the final video soft (loudnorm ramps up slowly).
+	AudioGainDB float64 `json:"audioGainDb,omitempty"`
 }
 
 // TrimRange lets the reviewer override where Assemble cuts content out of the

@@ -52,6 +52,23 @@ func resolveContentRange(seg model.Segment, trim *model.TrimRange) (startSrc, en
 	return startSrc, endSrc, nil
 }
 
+// assembleLoudnorm is the loudness target applied to every Assemble input.
+const assembleLoudnorm = "loudnorm=I=-14:LRA=11:TP=-1.5"
+
+// contentAudioFilter builds the filter chain for the content audio pad. A
+// non-zero gainDB (reviewer-set metadata.audioGainDb) is applied as a fixed
+// pre-gain ahead of loudnorm. Single-pass loudnorm only ramps its gain up
+// gradually, so on a very quiet recording (~-48 LUFS vs the -14 target) the
+// first ~40s come out soft; lifting the input near the target first removes
+// that ramp. Filters run in float, so a large pre-gain doesn't clip before
+// loudnorm's limiter.
+func contentAudioFilter(gainDB float64) string {
+	if gainDB == 0 {
+		return "[1:a]" + assembleLoudnorm + "[a1]"
+	}
+	return fmt.Sprintf("[1:a]volume=%.1fdB,%s[a1]", gainDB, assembleLoudnorm)
+}
+
 // resolveIntroPath picks the intro file Assemble should use. If the event's
 // RecordingDate parses cleanly and a year-specific sibling of the configured
 // base intro exists on disk (e.g. assets/intro.m4v → assets/intro-2026.m4v),
@@ -168,9 +185,9 @@ func (a *Activities) Assemble(ctx context.Context, input model.AssembleInput) (m
 		fmt.Sprintf("[2:v]format=yuv420p,setsar=1,fps=%d,settb=1/%d000[v2]", assembleOutputFPS, assembleOutputFPS),
 		fmt.Sprintf("[v0][v1]xfade=transition=fade:duration=%.3f:offset=%.3f[vic]", assembleXfadeDuration, introXfadeOffset),
 		fmt.Sprintf("[vic][v2]xfade=transition=fade:duration=%.3f:offset=%.3f[outv]", assembleXfadeDuration, icXfadeOffset),
-		"[0:a]loudnorm=I=-14:LRA=11:TP=-1.5[a0]",
-		"[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a1]",
-		"[2:a]loudnorm=I=-14:LRA=11:TP=-1.5[a2]",
+		"[0:a]" + assembleLoudnorm + "[a0]",
+		contentAudioFilter(metadata.AudioGainDB),
+		"[2:a]" + assembleLoudnorm + "[a2]",
 		fmt.Sprintf("[a0][a1]acrossfade=d=%.3f:c1=tri:c2=tri[aic]", assembleXfadeDuration),
 		fmt.Sprintf("[aic][a2]acrossfade=d=%.3f:c1=tri:c2=tri[outa]", assembleXfadeDuration),
 	}, ";")
