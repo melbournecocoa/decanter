@@ -1,6 +1,8 @@
 package activity
 
 import (
+	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -185,6 +187,60 @@ func TestContentAudioFilter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := contentAudioFilter(tt.gainDB); got != tt.want {
 				t.Errorf("contentAudioFilter(%v) = %q, want %q", tt.gainDB, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseIntegratedLoudness(t *testing.T) {
+	summary := `[Parsed_ebur128_0 @ 0xb3ac20c00] Summary:
+
+  Integrated loudness:
+    I:         -47.9 LUFS
+    Threshold: -58.3 LUFS
+
+  Loudness range:
+    LRA:         7.8 LU
+    Threshold: -68.0 LUFS
+    LRA low:   -52.1 LUFS
+    LRA high:  -44.3 LUFS
+`
+	got, err := parseIntegratedLoudness(summary)
+	if err != nil {
+		t.Fatalf("parseIntegratedLoudness: %v", err)
+	}
+	if got != -47.9 {
+		t.Errorf("parseIntegratedLoudness = %v, want -47.9", got)
+	}
+
+	if _, err := parseIntegratedLoudness("no summary here"); err == nil {
+		t.Error("parseIntegratedLoudness on missing summary: want error, got nil")
+	}
+}
+
+func TestChooseAudioGain(t *testing.T) {
+	tests := []struct {
+		name       string
+		manual     float64
+		measured   float64
+		measureErr error
+		wantGain   float64
+		wantSource string
+	}{
+		{"manual overrides measurement", 12, -47.9, nil, 12, "manual"},
+		{"manual wins even when measurement failed", -3, 0, errors.New("boom"), -3, "manual"},
+		{"measurement failure falls back to none", 0, 0, errors.New("boom"), 0, "none"},
+		{"normal talk gets no pre-gain", 0, -20.5, nil, 0, "none"},
+		{"just above threshold gets no pre-gain", 0, -29.9, nil, 0, "none"},
+		{"quiet talk lifted to 4dB under target", 0, -47.9, nil, 29.9, "auto"},
+		{"near-silence is capped", 0, -70, nil, autoGainMaxDB, "auto"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gain, source := chooseAudioGain(tt.manual, tt.measured, tt.measureErr)
+			if math.Abs(gain-tt.wantGain) > 1e-9 || source != tt.wantSource {
+				t.Errorf("chooseAudioGain(%v, %v, %v) = (%v, %q), want (%v, %q)",
+					tt.manual, tt.measured, tt.measureErr, gain, source, tt.wantGain, tt.wantSource)
 			}
 		})
 	}

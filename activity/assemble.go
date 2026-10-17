@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -55,9 +57,66 @@ func resolveContentRange(seg model.Segment, trim *model.TrimRange) (startSrc, en
 // assembleLoudnorm is the loudness target applied to every Assemble input.
 const assembleLoudnorm = "loudnorm=I=-14:LRA=11:TP=-1.5"
 
+// Auto pre-gain tuning. Talks measuring below autoGainThresholdLUFS get lifted
+// to autoGainHeadroomDB under the loudnorm target, capped at autoGainMaxDB so
+// a near-silent recording doesn't get its noise floor dragged up 50dB.
+const (
+	assembleTargetLUFS    = -14.0
+	autoGainThresholdLUFS = -30.0
+	autoGainHeadroomDB    = 4.0
+	autoGainMaxDB         = 40.0
+)
+
+var integratedLoudnessRe = regexp.MustCompile(`(?m)^\s*I:\s+(-?[0-9.]+) LUFS`)
+
+// parseIntegratedLoudness pulls the integrated loudness (LUFS) out of an
+// ebur128 filter summary on ffmpeg's stderr.
+func parseIntegratedLoudness(stderr string) (float64, error) {
+	m := integratedLoudnessRe.FindStringSubmatch(stderr)
+	if m == nil {
+		return 0, fmt.Errorf("no integrated loudness in ebur128 output")
+	}
+	return strconv.ParseFloat(m[1], 64)
+}
+
+// measureLoudness runs a fast audio-only ebur128 pass over the content range.
+// Don't measure with loudnorm itself: it upsamples to 192kHz and runs ~100x
+// slower than ebur128.
+func measureLoudness(ctx context.Context, sourcePath string, start, duration float64) (float64, error) {
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-nostats",
+		"-ss", fmt.Sprintf("%.3f", start),
+		"-t", fmt.Sprintf("%.3f", duration),
+		"-i", sourcePath,
+		"-vn",
+		"-af", "ebur128=framelog=quiet",
+		"-f", "null", "-",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("ffmpeg ebur128: %w", err)
+	}
+	return parseIntegratedLoudness(string(out))
+}
+
+// chooseAudioGain decides the content pre-gain. A reviewer-set manualDB always
+// wins; otherwise a measured talk below the threshold is auto-lifted. A failed
+// measurement degrades to no pre-gain (the pre-existing behaviour). source is
+// "manual", "auto" or "none", for logging.
+func chooseAudioGain(manualDB, measuredLUFS float64, measureErr error) (gainDB float64, source string) {
+	if manualDB != 0 {
+		return manualDB, "manual"
+	}
+	if measureErr != nil || measuredLUFS >= autoGainThresholdLUFS {
+		return 0, "none"
+	}
+	gain := math.Round((assembleTargetLUFS-measuredLUFS-autoGainHeadroomDB)*10) / 10
+	return math.Min(gain, autoGainMaxDB), "auto"
+}
+
 // contentAudioFilter builds the filter chain for the content audio pad. A
-// non-zero gainDB (reviewer-set metadata.audioGainDb) is applied as a fixed
-// pre-gain ahead of loudnorm. Single-pass loudnorm only ramps its gain up
+// non-zero gainDB (from chooseAudioGain) is applied as a fixed pre-gain ahead
+// of loudnorm. Single-pass loudnorm only ramps its gain up
 // gradually, so on a very quiet recording (~-48 LUFS vs the -14 target) the
 // first ~40s come out soft; lifting the input near the target first removes
 // that ramp. Filters run in float, so a large pre-gain doesn't clip before
@@ -173,6 +232,22 @@ func (a *Activities) Assemble(ctx context.Context, input model.AssembleInput) (m
 		return model.AssembleOutput{}, fmt.Errorf("write adjusted SRT: %w", err)
 	}
 
+	// Measure the content's loudness so a very quiet recording gets pre-gained
+	// ahead of loudnorm (see chooseAudioGain). Skipped when the reviewer set
+	// audioGainDb by hand. Measurement failure is non-fatal.
+	var measuredLUFS float64
+	var measureErr error
+	if metadata.AudioGainDB == 0 {
+		stopKeepalive := keepalive(ctx, 30*time.Second)
+		measuredLUFS, measureErr = measureLoudness(ctx, sourcePath, contentStart, contentDuration)
+		stopKeepalive()
+		if measureErr != nil {
+			logger.Warn("Loudness measurement failed — no pre-gain", "error", measureErr)
+		}
+	}
+	audioGainDB, gainSource := chooseAudioGain(metadata.AudioGainDB, measuredLUFS, measureErr)
+	logger.Info("Content audio gain", "measuredLUFS", measuredLUFS, "gainDB", audioGainDB, "source", gainSource)
+
 	// xfade consumes the last D seconds of stream A and the first D seconds of
 	// stream B, producing output of length La + Lb − D. Chain two of them to
 	// cross-fade intro→content and content→outro.
@@ -186,7 +261,7 @@ func (a *Activities) Assemble(ctx context.Context, input model.AssembleInput) (m
 		fmt.Sprintf("[v0][v1]xfade=transition=fade:duration=%.3f:offset=%.3f[vic]", assembleXfadeDuration, introXfadeOffset),
 		fmt.Sprintf("[vic][v2]xfade=transition=fade:duration=%.3f:offset=%.3f[outv]", assembleXfadeDuration, icXfadeOffset),
 		"[0:a]" + assembleLoudnorm + "[a0]",
-		contentAudioFilter(metadata.AudioGainDB),
+		contentAudioFilter(audioGainDB),
 		"[2:a]" + assembleLoudnorm + "[a2]",
 		fmt.Sprintf("[a0][a1]acrossfade=d=%.3f:c1=tri:c2=tri[aic]", assembleXfadeDuration),
 		fmt.Sprintf("[aic][a2]acrossfade=d=%.3f:c1=tri:c2=tri[outa]", assembleXfadeDuration),
